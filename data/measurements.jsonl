@@ -1,0 +1,6 @@
+{"timestamp":"2026-01-24T22:09:16.815801465Z","target":"Google","duration":0.1499512,"size":17505,"speed":116737.9787557552,"status":"OK"}
+{"timestamp":"2026-01-24T22:09:16.82223805Z","target":"GitHub Home","duration":0.187974236,"size":561127,"speed":2985127.1745559857,"status":"OK"}
+{"timestamp":"2026-01-24T22:10:16.816145961Z","target":"Google","duration":0.371017736,"size":17458,"speed":47054.35429642102,"status":"ALERT"}
+{"timestamp":"2026-01-24T22:10:16.81628094Z","target":"GitHub Home","duration":0.937934617,"size":561127,"speed":598258.1193076916,"status":"OK"}
+{"timestamp":"2026-01-24T22:11:16.815892223Z","target":"Google","duration":0.222369922,"size":17463,"speed":78531.30424716343,"status":"OK"}
+{"timestamp":"2026-01-24T22:11:16.81600323Z","target":"GitHub Home","duration":0.974377885,"size":561127,"speed":575882.3231091703,"status":"OK"}

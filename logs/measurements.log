@@ -1,0 +1,6 @@
+OK [2026-01-24T22:09:16Z] [Google] time=0.15 size=17505 speed=116737.98 status=OK
+OK [2026-01-24T22:09:17Z] [GitHub Home] time=0.19 size=561127 speed=2985127.17 status=OK
+ALERT [2026-01-24T22:10:17Z] [Google] time=0.37 size=17458 speed=47054.35 status=ALERT
+OK [2026-01-24T22:10:17Z] [GitHub Home] time=0.94 size=561127 speed=598258.12 status=OK
+OK [2026-01-24T22:11:17Z] [Google] time=0.22 size=17463 speed=78531.30 status=OK
+OK [2026-01-24T22:11:17Z] [GitHub Home] time=0.97 size=561127 speed=575882.32 status=OK

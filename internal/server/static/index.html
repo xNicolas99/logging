@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTTP Monitor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .status-ok { color: green; font-weight: bold; }
+        .status-alert { color: red; font-weight: bold; }
+        .card { margin-bottom: 20px; }
+    </style>
+</head>
+<body class="bg-light">
+
+<div class="container mt-4">
+    <h1>HTTP Monitor Dashboard</h1>
+
+    <div id="targets-container" class="row">
+        <!-- Targets will be loaded here -->
+    </div>
+
+    <div class="mt-4">
+        <h3>Recent Log Entries</h3>
+        <pre id="logs-area" class="bg-white p-3 border" style="max-height: 300px; overflow-y: scroll;"></pre>
+    </div>
+</div>
+
+<!-- Modal for details -->
+<div class="modal fade" id="detailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detailModalLabel">Measurement Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <canvas id="speedChart"></canvas>
+                <div class="table-responsive mt-3">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Duration (s)</th>
+                                <th>Size (B)</th>
+                                <th>Speed (B/s)</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="detailTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    let targets = [];
+    let charts = {};
+
+    async function loadTargets() {
+        const res = await fetch('/api/targets');
+        targets = await res.json();
+        const container = document.getElementById('targets-container');
+        container.innerHTML = '';
+
+        for (const t of targets) {
+            // Fetch latest measurement for overview
+            const mRes = await fetch(`/api/measurements?target=${t.name}&limit=1`);
+            const measurements = await mRes.json();
+            const last = measurements.length > 0 ? measurements[0] : null;
+
+            const card = document.createElement('div');
+            card.className = 'col-md-4';
+            let statusClass = 'text-muted';
+            let statusText = 'No Data';
+            let speedText = '-';
+            let lastTime = '-';
+
+            if (last) {
+                statusClass = last.status === 'OK' ? 'status-ok' : 'status-alert';
+                statusText = last.status;
+                speedText = (last.speed / 1024).toFixed(2) + ' KB/s';
+                lastTime = new Date(last.timestamp).toLocaleTimeString();
+            }
+
+            card.innerHTML = `
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title">${t.name}</h5>
+                        <p class="card-text text-truncate" title="${t.url}">${t.url}</p>
+                        <hr>
+                        <p>Status: <span class="${statusClass}">${statusText}</span></p>
+                        <p>Speed: <strong>${speedText}</strong></p>
+                        <p class="text-muted small">Last: ${lastTime}</p>
+                        <button class="btn btn-primary btn-sm" onclick="showDetails('${t.name}')">Details</button>
+                    </div>
+                </div>
+            `;
+            container.appendChild(card);
+        }
+    }
+
+    let detailChart = null;
+
+    async function showDetails(targetName) {
+        const modal = new bootstrap.Modal(document.getElementById('detailModal'));
+        document.getElementById('detailModalLabel').innerText = `Measurements: ${targetName}`;
+
+        const res = await fetch(`/api/measurements?target=${targetName}&limit=50`);
+        const data = await res.json();
+
+        // Populate Table
+        const tbody = document.getElementById('detailTableBody');
+        tbody.innerHTML = '';
+        data.forEach(m => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${new Date(m.timestamp).toLocaleString()}</td>
+                <td>${m.duration.toFixed(3)}</td>
+                <td>${m.size}</td>
+                <td>${m.speed.toFixed(0)}</td>
+                <td class="${m.status === 'OK' ? 'status-ok' : 'status-alert'}">${m.status}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        // Populate Chart
+        const ctx = document.getElementById('speedChart').getContext('2d');
+        if (detailChart) detailChart.destroy();
+
+        // Data comes newest first, reverse for chart
+        const chartData = [...data].reverse();
+
+        detailChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartData.map(d => new Date(d.timestamp).toLocaleTimeString()),
+                datasets: [{
+                    label: 'Speed (B/s)',
+                    data: chartData.map(d => d.speed),
+                    borderColor: 'blue',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+
+        modal.show();
+    }
+
+    async function loadLogs() {
+        const res = await fetch('/logs');
+        const text = await res.text();
+        document.getElementById('logs-area').innerText = text;
+    }
+
+    // Initial load
+    loadTargets();
+    loadLogs();
+
+    // Auto refresh
+    setInterval(loadTargets, 10000);
+    setInterval(loadLogs, 10000);
+</script>
+
+</body>
+</html>

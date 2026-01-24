@@ -1,0 +1,21 @@
+{
+    "interval": 60,
+    "targets": [
+        {
+            "name": "GitHub Home",
+            "url": "https://github.com/",
+            "threshold": 102400
+        },
+        {
+            "name": "Google",
+            "url": "https://www.google.com/",
+            "threshold": 51200
+        }
+    ],
+    "influx": {
+        "url": "",
+        "token": "",
+        "org": "my-org",
+        "bucket": "monitor"
+    }
+}
