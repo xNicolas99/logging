@@ -17,9 +17,10 @@ FROM alpine:latest
 WORKDIR /app
 
 # Install certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates curl
 
 COPY --from=builder /app/monitor .
+# We don't necessarily need to COPY config.json if we mount it, but it's a good fallback
 COPY config.json .
 
 # Expose Web Port

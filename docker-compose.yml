@@ -22,7 +22,9 @@ services:
       start_period: 30s
 
   monitor:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: http-monitor
     restart: unless-stopped
     ports:
