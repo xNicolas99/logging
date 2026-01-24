@@ -2,20 +2,30 @@
     "interval": 60,
     "targets": [
         {
-            "name": "GitHub Home",
+            "name": "GitHub",
             "url": "https://github.com/",
-            "threshold": 102400
+            "threshold": 500000
         },
         {
-            "name": "Google",
-            "url": "https://www.google.com/",
-            "threshold": 51200
+            "name": "GHCR",
+            "url": "https://ghcr.io/",
+            "threshold": 500000
+        },
+        {
+            "name": "Hetzner Speedtest",
+            "url": "https://speed.hetzner.de/100MB.bin",
+            "threshold": 5000000
+        },
+        {
+            "name": "Cloudflare",
+            "url": "https://1.1.1.1",
+            "threshold": 500000
         }
     ],
     "influx": {
         "url": "",
         "token": "",
-        "org": "my-org",
+        "org": "myorg",
         "bucket": "monitor"
     }
 }

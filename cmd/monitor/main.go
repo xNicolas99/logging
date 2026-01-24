@@ -27,27 +27,26 @@ func main() {
 	}
 
 	// Override InfluxDB config from Env Vars (Docker Support)
-	if url := os.Getenv("INFLUX_URL"); url != "" {
+	envURL := os.Getenv("INFLUX_URL")
+	envToken := os.Getenv("INFLUX_TOKEN")
+	envOrg := os.Getenv("INFLUX_ORG")
+	envBucket := os.Getenv("INFLUX_BUCKET")
+
+	if envURL != "" || envToken != "" {
 		if cfg.Influx == nil {
 			cfg.Influx = &config.InfluxConfig{}
 		}
-		cfg.Influx.URL = url
-	}
-	if token := os.Getenv("INFLUX_TOKEN"); token != "" {
-		if cfg.Influx == nil {
-			log.Fatal("INFLUX_TOKEN env var set but InfluxDB not configured in config file structure properly (or use full config). Assuming basic struct.")
-			cfg.Influx = &config.InfluxConfig{}
+		if envURL != "" {
+			cfg.Influx.URL = envURL
 		}
-		cfg.Influx.Token = token
-	}
-	if org := os.Getenv("INFLUX_ORG"); org != "" {
-		if cfg.Influx != nil {
-			cfg.Influx.Org = org
+		if envToken != "" {
+			cfg.Influx.Token = envToken
 		}
-	}
-	if bucket := os.Getenv("INFLUX_BUCKET"); bucket != "" {
-		if cfg.Influx != nil {
-			cfg.Influx.Bucket = bucket
+		if envOrg != "" {
+			cfg.Influx.Org = envOrg
+		}
+		if envBucket != "" {
+			cfg.Influx.Bucket = envBucket
 		}
 	}
 
@@ -55,11 +54,16 @@ func main() {
 	var store storage.Storage
 	if cfg.Influx != nil && cfg.Influx.URL != "" && cfg.Influx.Token != "" {
 		log.Printf("Using InfluxDB Storage at %s", cfg.Influx.URL)
-		s, err := storage.NewInfluxStorage(cfg.Influx.URL, cfg.Influx.Token, cfg.Influx.Org, cfg.Influx.Bucket)
-		if err != nil {
-			log.Fatalf("Failed to initialize InfluxDB: %v", err)
+		for {
+			s, err := storage.NewInfluxStorage(cfg.Influx.URL, cfg.Influx.Token, cfg.Influx.Org, cfg.Influx.Bucket)
+			if err == nil {
+				store = s
+				log.Println("Successfully connected to InfluxDB")
+				break
+			}
+			log.Printf("Failed to connect to InfluxDB: %v. Retrying in 5 seconds...", err)
+			time.Sleep(5 * time.Second)
 		}
-		store = s
 	} else {
 		log.Println("Using JSONL File Storage")
 		// Ensure data dir exists
