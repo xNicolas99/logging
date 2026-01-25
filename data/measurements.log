@@ -1,0 +1,4 @@
+OK [2026-01-25T01:19:15Z] [Cloudflare] time=0.33 size=25000000 speed=74903547.97 status=OK
+OK [2026-01-25T01:19:15Z] [Google] time=0.55 size=17479 speed=31609.20 status=OK
+OK [2026-01-25T01:19:20Z] [Hetzner 100MB] time=5.21 size=104857600 speed=20144765.20 status=OK
+OK [2026-01-25T01:19:35Z] [Hetzner 1GB] time=20.00 size=498876163 speed=24942281.62 status=OK

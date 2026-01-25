@@ -28,7 +28,7 @@
     <nav class="bg-white dark:bg-gray-800 shadow p-4 flex justify-between items-center sticky top-0 z-10">
         <div class="flex items-center gap-4">
             <h1 class="text-xl font-bold tracking-tight">HTTP Monitor</h1>
-            <span class="px-2 py-1 text-xs rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">v1.1</span>
+            <span class="px-2 py-1 text-xs rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">v1.2</span>
         </div>
         <div class="flex items-center gap-4">
             <button onclick="runTest()" id="btn-run" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded shadow transition flex items-center gap-2">
@@ -72,21 +72,26 @@
                         <label class="block text-sm font-medium mb-1">URL</label>
                         <input type="url" id="target-url" class="w-full rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-gray-50 dark:bg-gray-700 p-2" required placeholder="https://google.com">
                     </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Interval (minutes)</label>
+                        <input type="number" id="target-interval" min="0" class="w-full rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-gray-50 dark:bg-gray-700 p-2" placeholder="Default: 60">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Leave 0 to use global default.</p>
+                    </div>
                     <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 rounded shadow transition">Add Target</button>
                 </form>
             </div>
 
             <!-- Settings -->
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                <h2 class="text-lg font-semibold mb-4 border-b dark:border-gray-700 pb-2">Settings</h2>
+                <h2 class="text-lg font-semibold mb-4 border-b dark:border-gray-700 pb-2">Global Settings</h2>
                 <form onsubmit="saveInterval(event)" class="space-y-4">
                     <div>
-                        <label class="block text-sm font-medium mb-1">Measurement Interval (minutes)</label>
+                        <label class="block text-sm font-medium mb-1">Global Default Interval (minutes)</label>
                         <div class="flex gap-2">
-                            <input type="number" id="settings-interval" min="3" class="w-full rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-gray-50 dark:bg-gray-700 p-2" required>
+                            <input type="number" id="settings-interval" min="1" class="w-full rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-gray-50 dark:bg-gray-700 p-2" required>
                             <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded shadow transition whitespace-nowrap">Save</button>
                         </div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Minimum 3 minutes.</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Minimum 1 minute.</p>
                     </div>
                 </form>
             </div>
@@ -132,9 +137,9 @@
                         <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
                             <tr>
                                 <th class="px-4 py-2">Time</th>
-                                <th class="px-4 py-2">Duration (s)</th>
+                                <th class="px-4 py-2">Type</th>
+                                <th class="px-4 py-2">Speed / Latency</th>
                                 <th class="px-4 py-2">Size (B)</th>
-                                <th class="px-4 py-2">Speed (B/s)</th>
                                 <th class="px-4 py-2">Loss %</th>
                                 <th class="px-4 py-2">Status</th>
                             </tr>
@@ -213,10 +218,13 @@
                 let statusColor = 'text-gray-500';
                 let statusBg = 'bg-gray-100 dark:bg-gray-700';
                 let statusText = 'No Data';
-                let speedText = '-';
+                let primaryText = '-';
+                let secondaryText = '';
                 let lastTime = '-';
+                let isSpeedTest = false;
 
                 if (last) {
+                    isSpeedTest = last.is_speed_test;
                     if (last.status === 'OK') {
                         statusColor = 'text-green-700 dark:text-green-400';
                         statusBg = 'bg-green-100 dark:bg-green-900/30';
@@ -225,15 +233,32 @@
                         statusBg = 'bg-red-100 dark:bg-red-900/30';
                     }
                     statusText = last.status;
-                    speedText = (last.speed / 1024 / 1024).toFixed(2) + ' MB/s';
+
+                    if (isSpeedTest) {
+                        primaryText = (last.speed / 1024 / 1024).toFixed(2) + ' MB/s';
+                        secondaryText = 'Speed Test';
+                    } else {
+                        primaryText = 'Response: ' + (last.latency ? last.latency.toFixed(0) : (last.duration * 1000).toFixed(0)) + ' ms';
+                        secondaryText = 'Web Check';
+                    }
+
                     lastTime = new Date(last.timestamp).toLocaleTimeString();
                 }
 
+                const primaryClass = isSpeedTest ? 'font-bold text-xl text-gray-900 dark:text-gray-100' : 'font-medium text-lg text-gray-700 dark:text-gray-300';
+                const labelText = isSpeedTest ? 'SPEED' : 'LATENCY';
+
                 const card = document.createElement('div');
-                card.className = 'bg-white dark:bg-gray-800 rounded-lg shadow hover:shadow-md transition duration-200 overflow-hidden flex flex-col';
+                card.className = 'bg-white dark:bg-gray-800 rounded-lg shadow hover:shadow-md transition duration-200 overflow-hidden flex flex-col relative group';
                 card.innerHTML = `
+                    <button onclick="deleteTarget('${t.name}')" class="absolute top-2 right-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition p-1" title="Delete Target">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+
                     <div class="p-5 flex-1">
-                        <div class="flex justify-between items-start mb-2">
+                        <div class="flex justify-between items-start mb-2 pr-6">
                             <h3 class="font-bold text-lg truncate" title="${t.name}">${t.name}</h3>
                             <span class="px-2 py-1 rounded text-xs font-bold ${statusColor} ${statusBg}">${statusText}</span>
                         </div>
@@ -241,8 +266,9 @@
 
                         <div class="grid grid-cols-2 gap-4 text-sm">
                             <div>
-                                <span class="block text-gray-500 dark:text-gray-400 text-xs uppercase">Speed</span>
-                                <span class="font-semibold text-lg">${speedText}</span>
+                                <span class="block text-gray-500 dark:text-gray-400 text-xs uppercase">${labelText}</span>
+                                <span class="${primaryClass}">${primaryText}</span>
+                                <span class="block text-xs text-gray-400">${secondaryText}</span>
                             </div>
                             <div>
                                 <span class="block text-gray-500 dark:text-gray-400 text-xs uppercase">Last Run</span>
@@ -300,8 +326,8 @@
         async function saveInterval(e) {
             e.preventDefault();
             const val = parseInt(document.getElementById('settings-interval').value);
-            if (val < 3) {
-                alert("Minimum 3 minutes required.");
+            if (val < 1) {
+                alert("Minimum 1 minute required.");
                 return;
             }
             try {
@@ -324,16 +350,19 @@
             e.preventDefault();
             const name = document.getElementById('target-name').value;
             const url = document.getElementById('target-url').value;
+            const intervalVal = document.getElementById('target-interval').value;
+            const interval = intervalVal ? parseInt(intervalVal) : 0;
 
             try {
                 const res = await fetch('/api/targets', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ name, url })
+                    body: JSON.stringify({ name, url, interval })
                 });
                 if (res.ok) {
                     document.getElementById('target-name').value = '';
                     document.getElementById('target-url').value = '';
+                    document.getElementById('target-interval').value = '';
                     loadTargets();
                     alert('Target added!');
                 } else {
@@ -344,14 +373,29 @@
             }
         }
 
+        async function deleteTarget(name) {
+            if (!confirm(`Are you sure you want to delete "${name}"?`)) return;
+
+            try {
+                const res = await fetch(`/api/targets?name=${encodeURIComponent(name)}`, {
+                    method: 'DELETE'
+                });
+                if (res.ok) {
+                    loadTargets();
+                } else {
+                    alert('Failed to delete target.');
+                }
+            } catch (e) {
+                alert('Error deleting target.');
+            }
+        }
+
         async function loadLogs() {
             try {
                 const res = await fetch('/logs');
                 const text = await res.text();
                 const area = document.getElementById('logs-area');
                 area.innerText = text;
-                // area.scrollTop = area.scrollHeight; // removed auto scroll to bottom to annoy less if reading?
-                // But usually one wants to see latest.
             } catch (e) {
                 console.error(e);
             }
@@ -391,16 +435,22 @@
 
             tableData.forEach(m => {
                 const tr = document.createElement('tr');
-                const speedMB = (m.speed / 1024 / 1024).toFixed(2);
+                let speedText = '-';
+                if (m.is_speed_test) {
+                     speedText = (m.speed / 1024 / 1024).toFixed(2) + ' MB/s';
+                } else {
+                     speedText = 'Latency: ' + (m.latency ? m.latency.toFixed(0) : (m.duration * 1000).toFixed(0)) + ' ms';
+                }
+                const typeText = m.is_speed_test ? 'Speed Test' : 'Web Check';
                 const statusColor = m.status === 'OK' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
                 const loss = m.packet_loss !== undefined ? m.packet_loss.toFixed(1) + '%' : '-';
 
                 tr.className = "hover:bg-gray-100 dark:hover:bg-gray-700 transition";
                 tr.innerHTML = `
                     <td class="px-4 py-2">${new Date(m.timestamp).toLocaleString()}</td>
-                    <td class="px-4 py-2">${m.duration ? m.duration.toFixed(3) : '-'}</td>
+                    <td class="px-4 py-2 text-xs text-gray-500">${typeText}</td>
+                    <td class="px-4 py-2 font-mono">${speedText}</td>
                     <td class="px-4 py-2">${m.size || '-'}</td>
-                    <td class="px-4 py-2">${speedMB} MB/s</td>
                     <td class="px-4 py-2">${loss}</td>
                     <td class="px-4 py-2 font-bold ${statusColor}">${m.status}</td>
                 `;

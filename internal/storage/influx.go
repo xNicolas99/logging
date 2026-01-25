@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
@@ -48,12 +49,14 @@ func NewInfluxStorage(url, token, org, bucket string) (*InfluxStorage, error) {
 func (s *InfluxStorage) SaveMeasurement(m model.Measurement) error {
 	p := influxdb2.NewPointWithMeasurement("http_download").
 		AddTag("target", m.Target).
+		AddTag("is_speed_test", strconv.FormatBool(m.IsSpeedTest)).
 		AddField("duration", m.Duration).
 		AddField("size", m.Size).
 		AddField("speed", m.Speed).
 		AddField("status", m.Status).
 		AddField("packet_loss", m.PacketLoss).
 		AddField("trace_output", m.TraceOutput).
+		AddField("latency", m.Latency).
 		SetTime(m.Timestamp)
 
 	return s.writeAPI.WritePoint(context.Background(), p)
@@ -69,11 +72,14 @@ func (s *InfluxStorage) GetMeasurementsWithRange(targetName string, rangeStart s
 	var query string
 	if aggregate {
 		// Use aggregateWindow for downsampling
+		// Note: mean() drops string fields like status/trace_output.
+		// We might accept that for long-term aggregation or switch to last() if preferred,
+		// but sticking to mean() for numbers as per original logic.
 		query = fmt.Sprintf(`from(bucket: "%s")
 		|> range(start: %s)
 		|> filter(fn: (r) => r["_measurement"] == "http_download")
 		|> filter(fn: (r) => r["target"] == "%s")
-		|> filter(fn: (r) => r["_field"] == "speed" or r["_field"] == "packet_loss" or r["_field"] == "status" or r["_field"] == "duration" or r["_field"] == "size")
+		|> filter(fn: (r) => r["_field"] == "speed" or r["_field"] == "packet_loss" or r["_field"] == "status" or r["_field"] == "duration" or r["_field"] == "size" or r["_field"] == "latency")
 		|> aggregateWindow(every: %s, fn: mean, createEmpty: false)
 		|> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
 		|> sort(columns: ["_time"], desc: true)
@@ -121,6 +127,12 @@ func (s *InfluxStorage) GetMeasurementsWithRange(targetName string, rangeStart s
 		}
 		if v, ok := r.ValueByKey("trace_output").(string); ok {
 			m.TraceOutput = v
+		}
+		if v, ok := r.ValueByKey("latency").(float64); ok {
+			m.Latency = v
+		}
+		if v, ok := r.ValueByKey("is_speed_test").(string); ok {
+			m.IsSpeedTest = (v == "true")
 		}
 		measurements = append(measurements, m)
 	}
