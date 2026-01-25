@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/jules/http-monitor/internal/config"
+	"github.com/jules/http-monitor/internal/monitor"
 	"github.com/jules/http-monitor/internal/storage"
 )
 
@@ -20,13 +21,15 @@ var staticFiles embed.FS
 type Server struct {
 	cfg     *config.Config
 	storage storage.Storage
+	monitor *monitor.Monitor
 	logPath string
 }
 
-func NewServer(cfg *config.Config, s storage.Storage, logPath string) *Server {
+func NewServer(cfg *config.Config, s storage.Storage, m *monitor.Monitor, logPath string) *Server {
 	return &Server{
 		cfg:     cfg,
 		storage: s,
+		monitor: m,
 		logPath: logPath,
 	}
 }
@@ -34,6 +37,8 @@ func NewServer(cfg *config.Config, s storage.Storage, logPath string) *Server {
 func (s *Server) Start(port int) error {
 	http.HandleFunc("/api/targets", s.handleTargets)
 	http.HandleFunc("/api/measurements", s.handleMeasurements)
+	http.HandleFunc("/api/run", s.handleRunNow)
+	http.HandleFunc("/api/config/interval", s.handleInterval)
 	http.HandleFunc("/logs", s.handleLogs)
 
 	// Serve static files
@@ -49,6 +54,27 @@ func (s *Server) Start(port int) error {
 }
 
 func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var req struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Name == "" || req.URL == "" {
+			http.Error(w, "Name and URL required", http.StatusBadRequest)
+			return
+		}
+		if err := s.monitor.AddTarget(req.Name, req.URL); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(s.cfg.Targets)
 }
@@ -73,6 +99,41 @@ func (s *Server) handleMeasurements(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(measurements)
 }
 
+func (s *Server) handleRunNow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.monitor.RunNow()
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Measurements triggered"))
+}
+
+func (s *Server) handleInterval(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		// Return interval in minutes
+		json.NewEncoder(w).Encode(map[string]int{"interval": s.cfg.Interval / 60})
+		return
+	}
+	if r.Method == http.MethodPost {
+		var req struct {
+			Interval int `json:"interval"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := s.monitor.SetInterval(req.Interval); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	file, err := os.Open(s.logPath)
 	if err != nil {
@@ -86,7 +147,6 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	// Simple tail implementation: read last 100 lines
-	// For simplicity, we read all and take last 100. For huge logs, reading backward is better.
 	var lines []string
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
