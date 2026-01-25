@@ -57,8 +57,9 @@ func (s *Server) Start(port int) error {
 func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var req struct {
-			Name string `json:"name"`
-			URL  string `json:"url"`
+			Name     string `json:"name"`
+			URL      string `json:"url"`
+			Interval int    `json:"interval"` // Optional
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -68,11 +69,25 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Name and URL required", http.StatusBadRequest)
 			return
 		}
-		if err := s.monitor.AddTarget(req.Name, req.URL); err != nil {
+		if err := s.monitor.AddTarget(req.Name, req.URL, req.Interval); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
+		return
+	}
+
+	if r.Method == http.MethodDelete {
+		name := r.URL.Query().Get("name")
+		if name == "" {
+			http.Error(w, "Name required", http.StatusBadRequest)
+			return
+		}
+		if err := s.monitor.DeleteTarget(name); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 

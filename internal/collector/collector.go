@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
-	"sync"
 	"time"
 
 	"github.com/jules/http-monitor/internal/logger"
@@ -31,29 +30,20 @@ func NewCollector(s storage.Storage, l *logger.FileLogger) *Collector {
 
 // MeasureTarget performs a single measurement for a target.
 func (c *Collector) MeasureTarget(t model.Target) {
-	start := time.Now()
-	var wg sync.WaitGroup
+	// 1. Run MTR / Ping Check (Sequential, BEFORE Speedtest)
+	// Use 15s timeout for MTR
+	ctxMtr, cancelMtr := context.WithTimeout(context.Background(), 15*time.Second)
+	loss, traceOutput := c.runMTR(ctxMtr, t.URL)
+	cancelMtr()
 
-	// Traceroute result
-	var loss float64
-	var traceOutput string
+	// 2. Download Speed Test / Web Check
+	// Use 20s timeout for download to allow for speed ramp up
+	ctxDl, cancelDl := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancelDl()
 
-	// Use 15s timeout to allow reaching high speeds and mtr to finish
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	// Start traceroute in parallel
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		loss, traceOutput = c.runMTR(ctx, t.URL)
-	}()
-
-	// Download Speed Test
-	req, err := http.NewRequestWithContext(ctx, "GET", t.URL, nil)
+	req, err := http.NewRequestWithContext(ctxDl, "GET", t.URL, nil)
 	if err != nil {
-		c.logError(t, err)
-		wg.Wait() // wait for trace to finish even if download fails
+		c.logError(t, err, loss, traceOutput)
 		return
 	}
 
@@ -65,28 +55,31 @@ func (c *Collector) MeasureTarget(t model.Target) {
 	}
 	req.Header.Set("User-Agent", "HTTP-Monitor/1.0")
 
+	start := time.Now()
 	resp, err := client.Do(req)
 
+	// Measure TTFB (Time To First Byte / Headers)
+	ttfb := time.Since(start).Seconds() * 1000 // in ms
+
 	var written int64
-	var duration float64
+	var totalDuration float64
 	var dlErr error
+	var statusCode int
 
 	if err != nil {
 		dlErr = err
 	} else {
+		statusCode = resp.StatusCode
 		defer resp.Body.Close()
 
-		// Limit download to 500MB (approx 5s on 1Gbps) to avoid endless download,
-		// but allow enough time for speed to ramp up.
-		// If connection is 100Mbps, 500MB takes 40s -> timeout hits at 15s.
-		// If connection is 1Gbps, 500MB takes 4s -> finishes early.
+		// Limit download to 500MB
 		const maxBytes = 500 * 1024 * 1024
 		reader := io.LimitReader(resp.Body, maxBytes)
 
-		// Use CopyBuffer with 32KB buffer for better performance than default
+		// Use CopyBuffer
 		buf := make([]byte, 32*1024)
 		written, dlErr = io.CopyBuffer(io.Discard, reader, buf)
-		duration = time.Since(start).Seconds()
+		totalDuration = time.Since(start).Seconds()
 
 		// Ignore context deadline exceeded or EOF if we got some data
 		if dlErr == context.DeadlineExceeded || dlErr == io.EOF || dlErr == io.ErrUnexpectedEOF {
@@ -94,33 +87,56 @@ func (c *Collector) MeasureTarget(t model.Target) {
 		}
 	}
 
-	// Wait for traceroute
-	wg.Wait()
-
 	if dlErr != nil {
-		c.logError(t, dlErr)
+		c.logError(t, dlErr, loss, traceOutput)
 		return
 	}
 
+	// Calculate Speed
 	speed := 0.0
-	if duration > 0 {
-		speed = float64(written) / duration
+	if totalDuration > 0 {
+		speed = float64(written) / totalDuration
 	}
 
+	// Determine IsSpeedTest
+	// Rule: TotalSize > 5 MB ODER Duration > 2 Seconds
+	isSpeedTest := false
+	if written > 5*1024*1024 || totalDuration > 2.0 {
+		isSpeedTest = true
+	}
+
+	// Alerting Logic
 	status := "OK"
-	if speed < t.Threshold {
-		status = "ALERT"
+	if isSpeedTest {
+		// Speed Test Logic: Speed Drop + Packet Loss (Packet Loss handled by looking at the loss value?
+		// Original logic only checked speed.
+		// "Speed Tests (IsSpeedTest=true): Behalte die bestehende Logik (Speed Drop + Packet Loss Alerts) bei."
+		// Existing logic was: if speed < t.Threshold { status = "ALERT" }
+		if speed < t.Threshold {
+			status = "ALERT"
+		}
+	} else {
+		// Web Check Logic
+		// "Sende Alerts nur, wenn HTTP Status != 200 ODER die Latenz > 1000ms"
+		if statusCode != 200 {
+			status = "ALERT"
+		}
+		if ttfb > 1000 {
+			status = "ALERT"
+		}
 	}
 
 	m := model.Measurement{
 		Timestamp:   start,
 		Target:      t.Name,
-		Duration:    duration,
+		Duration:    totalDuration,
 		Size:        written,
 		Speed:       speed,
 		Status:      status,
 		PacketLoss:  loss,
 		TraceOutput: traceOutput,
+		IsSpeedTest: isSpeedTest,
+		Latency:     ttfb,
 	}
 
 	// Save to storage
@@ -128,24 +144,30 @@ func (c *Collector) MeasureTarget(t model.Target) {
 		fmt.Printf("Error saving measurement for %s: %v\n", t.Name, err)
 	}
 
-	// Log to file
-	c.logger.Log(status, t.Name, duration, written, speed)
+	// Log to file (Legacy logging format, maybe we want to add latency/isSpeedTest here too?
+	// The logger interface assumes fixed args. I will keep it as is for compatibility or update it if I updated logger.)
+	// I didn't update Logger signature in plan. I will just log speed/duration.
+	c.logger.Log(status, t.Name, totalDuration, written, speed)
 }
 
-func (c *Collector) logError(t model.Target, err error) {
+func (c *Collector) logError(t model.Target, err error, loss float64, traceOutput string) {
 	m := model.Measurement{
-		Timestamp: time.Now(),
-		Target:    t.Name,
-		Duration:  0,
-		Size:      0,
-		Speed:     0,
-		Status:    "ALERT",
+		Timestamp:   time.Now(),
+		Target:      t.Name,
+		Duration:    0,
+		Size:        0,
+		Speed:       0,
+		Status:      "ALERT",
+		PacketLoss:  loss,
+		TraceOutput: fmt.Sprintf("Error: %v\n%s", err, traceOutput),
+		IsSpeedTest: false, // Error usually means web check failed or connect failed
+		Latency:     0,
 	}
 	c.storage.SaveMeasurement(m)
 	c.logger.Log("ALERT", t.Name, 0, 0, 0)
 }
 
-// runMTR executes mtr -j -c 10 -r <host> and returns loss percentage and full output
+// runMTR executes mtr -j -c 10 <host> and returns loss percentage and full output
 func (c *Collector) runMTR(ctx context.Context, targetURL string) (float64, string) {
 	// Extract hostname from URL
 	u, err := url.Parse(targetURL)
@@ -157,13 +179,7 @@ func (c *Collector) runMTR(ctx context.Context, targetURL string) (float64, stri
 	// mtr needs root, usually available in docker
 	// -j: JSON output
 	// -c 10: 10 cycles
-	// -w: report wide (implies -r report mode) - actually -w is wide report.
-	// user suggested: mtr -r -c 10 -w <host> OR mtr -j
-	// We use -j for parsing. -z for no DNS lookup might be faster but we probably want DNS.
-	// -w not always compatible with -j in some versions?
-	// Let's try: mtr -j -c 10 <host> (this usually streams JSON or produces report at end?)
-	// mtr --json creates a report at the end.
-
+	// Note: mtr -j outputs the report at the end.
 	cmd := exec.CommandContext(ctx, "mtr", "--json", "-c", "10", host)
 	out, err := cmd.Output()
 	if err != nil {
@@ -172,27 +188,12 @@ func (c *Collector) runMTR(ctx context.Context, targetURL string) (float64, stri
 	}
 
 	// Parse JSON
-	// Structure: { "report": { "hub": [ ... ] } }
 	type MtrHop struct {
 		Count int     `json:"count"`
 		Loss  float64 `json:"Loss%"`
 		Host  string  `json:"host"`
 	}
-	type MtrReport struct {
-		Mtr struct {
-			Src   string   `json:"src"`
-			Dst   string   `json:"dst"`
-			Tests int      `json:"tests"`
-		} `json:"mtr"` // Sometimes it is nested differently or "report"
-		Hubs []MtrHop `json:"hubs"`
-	}
-
-	// MTR JSON format can vary. Let's look at standard mtr --json output.
-	// Typically: { "report": { "hubs": [...] } }
-	// But let's handle a generic map to be safe first or try strict struct.
-	// For simplicity, let's decode to map[string]interface{} to inspect.
-
-	// NOTE: mtr 0.92+ uses "report": { "hubs": ... }
+	// mtr 0.92+ uses "report": { "hubs": ... }
 	type Root struct {
 		Report struct {
 			Hubs []MtrHop `json:"hubs"`

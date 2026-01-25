@@ -19,8 +19,15 @@ import (
 )
 
 func main() {
+	// Default to /app/data/config.json for persistence
 	configPath := flag.String("config", "/app/data/config.json", "Path to configuration file")
 	flag.Parse()
+
+	// Ensure data directory exists
+	dataDir := filepath.Dir(*configPath)
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		log.Printf("Warning: Failed to create data directory %s: %v", dataDir, err)
+	}
 
 	// Load Configuration
 	var cfg *config.Config
@@ -30,14 +37,8 @@ func main() {
 		log.Printf("Config file not found at %s. Creating default.", *configPath)
 		cfg = config.DefaultConfig()
 
-		// Ensure directory exists
-		dir := filepath.Dir(*configPath)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			log.Printf("Warning: Failed to create config directory %s: %v", dir, err)
-		} else {
-			if err := config.SaveConfig(*configPath, cfg); err != nil {
-				log.Printf("Warning: Failed to save default config: %v", err)
-			}
+		if err := config.SaveConfig(*configPath, cfg); err != nil {
+			log.Printf("Warning: Failed to save default config: %v", err)
 		}
 	} else {
 		cfg, err = config.LoadConfig(*configPath)
@@ -86,9 +87,9 @@ func main() {
 		}
 	} else {
 		log.Println("Using JSONL File Storage")
-		// Ensure data dir exists
-		os.MkdirAll("data", 0755)
-		s, err := storage.NewJSONLStorage("data/measurements.jsonl")
+		// Use /app/data for JSONL storage too
+		jsonlPath := filepath.Join(dataDir, "measurements.jsonl")
+		s, err := storage.NewJSONLStorage(jsonlPath)
 		if err != nil {
 			log.Fatalf("Failed to initialize JSONL storage: %v", err)
 		}
@@ -97,7 +98,8 @@ func main() {
 	defer store.Close()
 
 	// Initialize Logger
-	logPath := "logs/measurements.log"
+	// Use /app/data for logs too for persistence
+	logPath := filepath.Join(dataDir, "measurements.log")
 	fileLogger, err := logger.NewFileLogger(logPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize logger: %v", err)
