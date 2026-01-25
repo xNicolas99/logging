@@ -17,7 +17,7 @@ type InfluxConfig struct {
 
 // Config represents the application configuration.
 type Config struct {
-	Interval int            `json:"interval"` // Measurement interval in seconds
+	Interval int            `json:"interval"` // Global default measurement interval in seconds
 	Targets  []model.Target `json:"targets"`
 	Influx   *InfluxConfig  `json:"influx,omitempty"`
 }
@@ -57,13 +57,10 @@ func DefaultConfig() *Config {
 	return &Config{
 		Interval: 3600, // 60 minutes default
 		Targets: []model.Target{
-			{Name: "GitHub", URL: "https://github.com/", Threshold: 500000},
-			{Name: "GHCR", URL: "https://ghcr.io/", Threshold: 500000},
-			{Name: "Hetzner Speedtest", URL: "https://speed.hetzner.de/100MB.bin", Threshold: 5000000},
-			{Name: "Cloudflare", URL: "https://1.1.1.1", Threshold: 500000},
-			{Name: "Twitch", URL: "https://www.twitch.tv", Threshold: 500000},
-			{Name: "Reddit", URL: "https://www.reddit.com", Threshold: 500000},
-			{Name: "Discord", URL: "https://discord.com", Threshold: 500000},
+			{Name: "Hetzner Speedtest", URL: "https://fsn1-speed.hetzner.com/100MB.bin", Threshold: 5000000, Interval: 60},
+			{Name: "Hetzner 1GB", URL: "https://fsn1-speed.hetzner.com/1GB.bin", Threshold: 5000000, Interval: 60},
+			{Name: "Cloudflare", URL: "https://speed.cloudflare.com/__down?bytes=25000000", Threshold: 500000, Interval: 60},
+			{Name: "Google", URL: "https://google.com", Threshold: 50000, Interval: 10},
 		},
 		Influx: &InfluxConfig{
 			Org:    "myorg",

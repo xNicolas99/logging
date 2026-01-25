@@ -17,6 +17,7 @@ type Monitor struct {
 	running    bool
 	mu         sync.Mutex
 	wg         sync.WaitGroup
+	lastRun    map[string]time.Time
 }
 
 func NewMonitor(configPath string, cfg *config.Config, col *collector.Collector) *Monitor {
@@ -24,6 +25,7 @@ func NewMonitor(configPath string, cfg *config.Config, col *collector.Collector)
 		cfg:        cfg,
 		configPath: configPath,
 		collector:  col,
+		lastRun:    make(map[string]time.Time),
 	}
 }
 
@@ -35,33 +37,66 @@ func (m *Monitor) Start() {
 		return
 	}
 
-	intervalSeconds := m.cfg.Interval
-	// Enforce minimum 3 minutes (180 seconds)
-	if intervalSeconds < 180 {
-		intervalSeconds = 180
-	}
-
 	m.quit = make(chan struct{})
 	m.running = true
 	m.wg.Add(1)
 
-	go m.runLoop(time.Duration(intervalSeconds) * time.Second)
+	// Check every 10 seconds
+	go m.runLoop(10 * time.Second)
 }
 
-func (m *Monitor) runLoop(interval time.Duration) {
+func (m *Monitor) runLoop(checkInterval time.Duration) {
 	defer m.wg.Done()
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
-	// Run once immediately
-	m.RunNow()
+	// Initial check
+	m.checkAndRun()
 
 	for {
 		select {
 		case <-ticker.C:
-			m.RunNow()
+			m.checkAndRun()
 		case <-m.quit:
 			return
+		}
+	}
+}
+
+func (m *Monitor) checkAndRun() {
+	m.mu.Lock()
+	targets := make([]model.Target, len(m.cfg.Targets))
+	copy(targets, m.cfg.Targets)
+	globalIntervalSec := m.cfg.Interval
+	m.mu.Unlock()
+
+	for _, t := range targets {
+		// Calculate target interval duration
+		var interval time.Duration
+		if t.Interval > 0 {
+			interval = time.Duration(t.Interval) * time.Minute
+		} else {
+			interval = time.Duration(globalIntervalSec) * time.Second
+		}
+
+		// Enforce minimum 1 minute to avoid crazy loops if config is bad
+		if interval < 1*time.Minute {
+			interval = 1 * time.Minute
+		}
+
+		m.mu.Lock()
+		last := m.lastRun[t.Name]
+		m.mu.Unlock()
+
+		if time.Since(last) >= interval {
+			// Trigger measurement
+			// Update lastRun immediately to prevent double triggering in next tick if measurement is slow
+			// (We assume it starts now)
+			m.mu.Lock()
+			m.lastRun[t.Name] = time.Now()
+			m.mu.Unlock()
+
+			go m.collector.MeasureTarget(t)
 		}
 	}
 }
@@ -81,19 +116,23 @@ func (m *Monitor) Stop() {
 // RunNow triggers an immediate measurement for all targets.
 func (m *Monitor) RunNow() {
 	m.mu.Lock()
-	// Copy targets to avoid holding lock during iteration or async calls if targets change
 	targets := make([]model.Target, len(m.cfg.Targets))
 	copy(targets, m.cfg.Targets)
+
+	// Update lastRun for all
+	now := time.Now()
+	for _, t := range targets {
+		m.lastRun[t.Name] = now
+	}
 	m.mu.Unlock()
 
 	for _, t := range targets {
-		// Launch each measurement in a goroutine
 		go m.collector.MeasureTarget(t)
 	}
 }
 
 // AddTarget adds a new target to the configuration and saves it.
-func (m *Monitor) AddTarget(name, url string) error {
+func (m *Monitor) AddTarget(name, url string, interval int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -101,34 +140,49 @@ func (m *Monitor) AddTarget(name, url string) error {
 		Name:      name,
 		URL:       url,
 		Threshold: 500000, // Default threshold
+		Interval:  interval,
 	}
 	m.cfg.Targets = append(m.cfg.Targets, t)
 
 	return config.SaveConfig(m.configPath, m.cfg)
 }
 
-// SetInterval updates the measurement interval (in minutes) and saves configuration.
-// If the monitor is running, it restarts the loop with the new interval.
+// DeleteTarget removes a target by name.
+func (m *Monitor) DeleteTarget(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	newTargets := []model.Target{}
+	found := false
+	for _, t := range m.cfg.Targets {
+		if t.Name == name {
+			found = true
+			continue
+		}
+		newTargets = append(newTargets, t)
+	}
+
+	if !found {
+		return nil // Or error "not found"
+	}
+
+	m.cfg.Targets = newTargets
+	delete(m.lastRun, name)
+
+	return config.SaveConfig(m.configPath, m.cfg)
+}
+
+// SetInterval updates the GLOBAL default measurement interval (in minutes).
 func (m *Monitor) SetInterval(minutes int) error {
-	if minutes < 3 {
-		minutes = 3
+	if minutes < 1 {
+		minutes = 1
 	}
 
 	m.mu.Lock()
 	m.cfg.Interval = minutes * 60
 	err := config.SaveConfig(m.configPath, m.cfg)
-	isRunning := m.running
 	m.mu.Unlock()
 
-	if err != nil {
-		return err
-	}
-
-	if isRunning {
-		m.Stop()
-		m.wg.Wait() // Wait for the old loop to exit completely
-		m.Start()
-	}
-
-	return nil
+    // No need to restart loop, it picks up new interval in next tick
+	return err
 }
