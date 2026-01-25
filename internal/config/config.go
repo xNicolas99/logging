@@ -61,6 +61,9 @@ func DefaultConfig() *Config {
 			{Name: "GHCR", URL: "https://ghcr.io/", Threshold: 500000},
 			{Name: "Hetzner Speedtest", URL: "https://speed.hetzner.de/100MB.bin", Threshold: 5000000},
 			{Name: "Cloudflare", URL: "https://1.1.1.1", Threshold: 500000},
+			{Name: "Twitch", URL: "https://www.twitch.tv", Threshold: 500000},
+			{Name: "Reddit", URL: "https://www.reddit.com", Threshold: 500000},
+			{Name: "Discord", URL: "https://discord.com", Threshold: 500000},
 		},
 		Influx: &InfluxConfig{
 			Org:    "myorg",

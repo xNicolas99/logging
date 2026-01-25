@@ -87,6 +87,12 @@ func (s *JSONLStorage) GetMeasurements(targetName string, limit int) ([]model.Me
 	return measurements, nil
 }
 
+// GetMeasurementsWithRange implements the interface for JSONL but ignores aggregation logic for simplicity in this fallback.
+func (s *JSONLStorage) GetMeasurementsWithRange(targetName string, rangeStart string, limit int, aggregate bool, window string) ([]model.Measurement, error) {
+	// Fallback to standard get, ignoring range parsing for now as JSONL is secondary/fallback
+	return s.GetMeasurements(targetName, limit)
+}
+
 func (s *JSONLStorage) Close() error {
 	return s.file.Close()
 }

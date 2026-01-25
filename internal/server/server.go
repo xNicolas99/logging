@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/jules/http-monitor/internal/config"
+	"github.com/jules/http-monitor/internal/model"
 	"github.com/jules/http-monitor/internal/monitor"
 	"github.com/jules/http-monitor/internal/storage"
 )
@@ -82,6 +83,8 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMeasurements(w http.ResponseWriter, r *http.Request) {
 	target := r.URL.Query().Get("target")
 	limitStr := r.URL.Query().Get("limit")
+	rangeParam := r.URL.Query().Get("range")
+
 	limit := 100
 	if limitStr != "" {
 		if l, err := strconv.Atoi(limitStr); err == nil {
@@ -89,7 +92,46 @@ func (s *Server) handleMeasurements(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	measurements, err := s.storage.GetMeasurements(target, limit)
+	var measurements []model.Measurement
+	var err error
+
+	// Defaults
+	aggregate := false
+	window := ""
+	rangeStart := "-24h"
+
+	if rangeParam != "" {
+		switch rangeParam {
+		case "8h":
+			rangeStart = "-8h"
+			// No aggregation for 8h, or small one
+		case "24h":
+			rangeStart = "-24h"
+			aggregate = true
+			window = "15m"
+		case "7d":
+			rangeStart = "-7d"
+			aggregate = true
+			window = "1h"
+		case "30d":
+			rangeStart = "-30d"
+			aggregate = true
+			window = "4h"
+		case "365d":
+			rangeStart = "-365d"
+			aggregate = true
+			window = "1d"
+		default:
+			// Invalid range
+			http.Error(w, "Invalid range parameter", http.StatusBadRequest)
+			return
+		}
+		measurements, err = s.storage.GetMeasurementsWithRange(target, rangeStart, limit, aggregate, window)
+	} else {
+		// Fallback for dashboard (latest)
+		measurements, err = s.storage.GetMeasurements(target, limit)
+	}
+
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
