@@ -61,6 +61,13 @@ func (s *JSONLStorage) GetMeasurements(targetName string, limit int) ([]model.Me
 
 	var measurements []model.Measurement
 	scanner := bufio.NewScanner(f)
+
+	// Increase buffer size to handle potentially large lines (e.g. extensive trace output)
+	// Default is 64KB, which might be exceeded by large MTR JSON output.
+	const maxCapacity = 10 * 1024 * 1024 // 10MB
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, maxCapacity)
+
 	for scanner.Scan() {
 		var m model.Measurement
 		if err := json.Unmarshal(scanner.Bytes(), &m); err != nil {
@@ -71,8 +78,11 @@ func (s *JSONLStorage) GetMeasurements(targetName string, limit int) ([]model.Me
 		}
 	}
 
+	// If scanning fails (e.g. bad line, too long), we just stop reading and return what we have.
+	// Returning an error here causes the frontend to receive a 500 and show nothing.
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		// We ignore the error to allow partial results.
+		// In a real logger we would log this.
 	}
 
 	// Reverse to get latest first

@@ -30,19 +30,24 @@ func NewCollector(s storage.Storage, l *logger.FileLogger) *Collector {
 
 // MeasureTarget performs a single measurement for a target.
 func (c *Collector) MeasureTarget(t model.Target) {
-	// 1. Run MTR / Ping Check (Sequential, BEFORE Speedtest)
-	// Use 15s timeout for MTR
-	ctxMtr, cancelMtr := context.WithTimeout(context.Background(), 15*time.Second)
-	loss, traceOutput := c.runMTR(ctxMtr, t.URL)
-	cancelMtr()
+	// 1. HTTP Check / Speed Test
+	// We run HTTP check first. MTR is only triggered if needed (SpeedTest or Failure/Slow).
 
-	// 2. Download Speed Test / Web Check
+	// Initialize MTR results
+	var loss float64
+	var traceOutput string
+
 	// Use 20s timeout for download to allow for speed ramp up
 	ctxDl, cancelDl := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancelDl()
 
 	req, err := http.NewRequestWithContext(ctxDl, "GET", t.URL, nil)
 	if err != nil {
+		// If request creation fails, run MTR to diagnose
+		ctxMtr, cancelMtr := context.WithTimeout(context.Background(), 15*time.Second)
+		loss, traceOutput = c.runMTR(ctxMtr, t.URL)
+		cancelMtr()
+
 		c.logError(t, err, loss, traceOutput)
 		return
 	}
@@ -88,6 +93,11 @@ func (c *Collector) MeasureTarget(t model.Target) {
 	}
 
 	if dlErr != nil {
+		// If download fails, run MTR to diagnose
+		ctxMtr, cancelMtr := context.WithTimeout(context.Background(), 15*time.Second)
+		loss, traceOutput = c.runMTR(ctxMtr, t.URL)
+		cancelMtr()
+
 		c.logError(t, dlErr, loss, traceOutput)
 		return
 	}
@@ -103,6 +113,26 @@ func (c *Collector) MeasureTarget(t model.Target) {
 	isSpeedTest := false
 	if written > 5*1024*1024 || totalDuration > 2.0 {
 		isSpeedTest = true
+	}
+
+	// Decide if we need MTR
+	// Run MTR if:
+	// 1. IsSpeedTest == true
+	// 2. HTTP Status != 200
+	// 3. Latency > 1000ms
+	runMtr := false
+	if isSpeedTest {
+		runMtr = true
+	} else if statusCode != 200 {
+		runMtr = true
+	} else if ttfb > 1000 {
+		runMtr = true
+	}
+
+	if runMtr {
+		ctxMtr, cancelMtr := context.WithTimeout(context.Background(), 15*time.Second)
+		loss, traceOutput = c.runMTR(ctxMtr, t.URL)
+		cancelMtr()
 	}
 
 	// Alerting Logic
