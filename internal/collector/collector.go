@@ -30,14 +30,20 @@ func NewCollector(s storage.Storage, l *logger.FileLogger) *Collector {
 
 // MeasureTarget performs a single measurement for a target.
 func (c *Collector) MeasureTarget(t model.Target) {
-	// 1. Run HTTP Check FIRST (Condition MTR)
+	// 1. Run MTR / Ping Check (Sequential, BEFORE Speedtest)
+	// Use 15s timeout for MTR
+	ctxMtr, cancelMtr := context.WithTimeout(context.Background(), 15*time.Second)
+	loss, traceOutput := c.runMTR(ctxMtr, t.URL)
+	cancelMtr()
+
+	// 2. Download Speed Test / Web Check
 	// Use 20s timeout for download to allow for speed ramp up
 	ctxDl, cancelDl := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancelDl()
 
 	req, err := http.NewRequestWithContext(ctxDl, "GET", t.URL, nil)
 	if err != nil {
-		c.logError(t, err, 0, "HTTP Request Failed")
+		c.logError(t, err, loss, traceOutput)
 		return
 	}
 
@@ -82,12 +88,6 @@ func (c *Collector) MeasureTarget(t model.Target) {
 	}
 
 	if dlErr != nil {
-		// If HTTP failed, we probably want to run MTR to see why
-		// We can do it here or let the common logic handle it if we flag it?
-		// Let's run MTR here to diagnose
-		ctxMtr, cancelMtr := context.WithTimeout(context.Background(), 5*time.Second)
-		loss, traceOutput := c.runMTR(ctxMtr, t.URL)
-		cancelMtr()
 		c.logError(t, dlErr, loss, traceOutput)
 		return
 	}
@@ -105,53 +105,25 @@ func (c *Collector) MeasureTarget(t model.Target) {
 		isSpeedTest = true
 	}
 
-	// Alerting Logic & Conditional MTR
+	// Alerting Logic
 	status := "OK"
-	shouldRunMTR := false
-
 	if isSpeedTest {
-		// Speed Test Logic
+		// Speed Test Logic: Speed Drop + Packet Loss (Packet Loss handled by looking at the loss value?
+		// Original logic only checked speed.
+		// "Speed Tests (IsSpeedTest=true): Behalte die bestehende Logik (Speed Drop + Packet Loss Alerts) bei."
+		// Existing logic was: if speed < t.Threshold { status = "ALERT" }
 		if speed < t.Threshold {
 			status = "ALERT"
-			shouldRunMTR = true // Analyze why speed is slow
 		}
-		// For SpeedTests, usually we might want MTR anyway?
-		// User said: "Führe bei jeder Messung (egal ob Speed oder Latenz) parallel (oder direkt davor) einen Traceroute durch"
-		// BUT later said: "Web Checks... only run MTR if check fails".
-		// For SpeedTests, it implies we still want it? Or maybe conditionally too?
-		// Let's assume for SpeedTests (heavy), we can afford the MTR or want it.
-		// But to keep it "Conditional" based on performance feedback:
-		// If Speed is OK, maybe skip?
-		// However, "Packet Loss" graph relies on MTR data. If we skip MTR, we have 0 packet loss data.
-		// If we skip MTR, the graph will show 0 loss.
-		// User said: "Extrahiere den Packet Loss (%) ... und speichere ihn".
-		// If we don't run MTR, we don't have this.
-		// BUT user complains about "Web Checks too slow".
-		// So for Web Checks (IsSpeedTest=false), we skip if healthy.
-		// For Speed Tests, we probably should run it (or maybe fast version).
-		// Let's run it for SpeedTests to populate the graph, as SpeedTests are slow anyway (seconds).
-		shouldRunMTR = true
 	} else {
 		// Web Check Logic
+		// "Sende Alerts nur, wenn HTTP Status != 200 ODER die Latenz > 1000ms"
 		if statusCode != 200 {
 			status = "ALERT"
-			shouldRunMTR = true
 		}
-		if ttfb > 500 { // User suggested >500ms threshold for "high latency"
+		if ttfb > 1000 {
 			status = "ALERT"
-			shouldRunMTR = true
 		}
-	}
-
-	var loss float64
-	var traceOutput string
-
-	if shouldRunMTR {
-		// Run Optimized MTR
-		// Use 5s timeout
-		ctxMtr, cancelMtr := context.WithTimeout(context.Background(), 5*time.Second)
-		loss, traceOutput = c.runMTR(ctxMtr, t.URL)
-		cancelMtr()
 	}
 
 	m := model.Measurement{
@@ -172,6 +144,9 @@ func (c *Collector) MeasureTarget(t model.Target) {
 		fmt.Printf("Error saving measurement for %s: %v\n", t.Name, err)
 	}
 
+	// Log to file (Legacy logging format, maybe we want to add latency/isSpeedTest here too?
+	// The logger interface assumes fixed args. I will keep it as is for compatibility or update it if I updated logger.)
+	// I didn't update Logger signature in plan. I will just log speed/duration.
 	c.logger.Log(status, t.Name, totalDuration, written, speed)
 }
 
@@ -185,14 +160,14 @@ func (c *Collector) logError(t model.Target, err error, loss float64, traceOutpu
 		Status:      "ALERT",
 		PacketLoss:  loss,
 		TraceOutput: fmt.Sprintf("Error: %v\n%s", err, traceOutput),
-		IsSpeedTest: false,
+		IsSpeedTest: false, // Error usually means web check failed or connect failed
 		Latency:     0,
 	}
 	c.storage.SaveMeasurement(m)
 	c.logger.Log("ALERT", t.Name, 0, 0, 0)
 }
 
-// runMTR executes mtr --json --report-cycles 1 --no-dns <host>
+// runMTR executes mtr -j -c 10 <host> and returns loss percentage and full output
 func (c *Collector) runMTR(ctx context.Context, targetURL string) (float64, string) {
 	// Extract hostname from URL
 	u, err := url.Parse(targetURL)
@@ -201,14 +176,11 @@ func (c *Collector) runMTR(ctx context.Context, targetURL string) (float64, stri
 		host = u.Host
 	}
 
-	// Optimized MTR:
-	// --json: JSON Output
-	// --report-cycles 1: Only 1 cycle (very fast)
-	// --no-dns: Skip DNS resolution (faster)
-	// Note: Alpine mtr might have different flags, but usually these are standard.
-	// user suggested: mtr --report --report-cycles 1 --no-dns
-	// We combine with --json for parsing.
-	cmd := exec.CommandContext(ctx, "mtr", "--json", "--report-cycles", "1", "--no-dns", host)
+	// mtr needs root, usually available in docker
+	// -j: JSON output
+	// -c 10: 10 cycles
+	// Note: mtr -j outputs the report at the end.
+	cmd := exec.CommandContext(ctx, "mtr", "--json", "-c", "10", host)
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Sprintf("MTR failed: %v", err)
@@ -220,6 +192,7 @@ func (c *Collector) runMTR(ctx context.Context, targetURL string) (float64, stri
 		Loss  float64 `json:"Loss%"`
 		Host  string  `json:"host"`
 	}
+	// mtr 0.92+ uses "report": { "hubs": ... }
 	type Root struct {
 		Report struct {
 			Hubs []MtrHop `json:"hubs"`

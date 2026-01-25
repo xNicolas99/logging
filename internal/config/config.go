@@ -57,7 +57,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Interval: 3600, // 60 minutes default
 		Targets: []model.Target{
-			{Name: "Hetzner Speedtest", URL: "https://fsn1-speed.hetzner.com/100MB.bin", Threshold: 5000000, Interval: 60},
+			{Name: "Hetzner 100MB", URL: "https://fsn1-speed.hetzner.com/100MB.bin", Threshold: 5000000, Interval: 60},
 			{Name: "Hetzner 1GB", URL: "https://fsn1-speed.hetzner.com/1GB.bin", Threshold: 5000000, Interval: 60},
 			{Name: "Cloudflare", URL: "https://speed.cloudflare.com/__down?bytes=25000000", Threshold: 500000, Interval: 60},
 			{Name: "Google", URL: "https://google.com", Threshold: 50000, Interval: 10},
