@@ -52,19 +52,41 @@ func (s *InfluxStorage) SaveMeasurement(m model.Measurement) error {
 		AddField("size", m.Size).
 		AddField("speed", m.Speed).
 		AddField("status", m.Status).
+		AddField("packet_loss", m.PacketLoss).
+		AddField("trace_output", m.TraceOutput).
 		SetTime(m.Timestamp)
 
 	return s.writeAPI.WritePoint(context.Background(), p)
 }
 
 func (s *InfluxStorage) GetMeasurements(targetName string, limit int) ([]model.Measurement, error) {
-	query := fmt.Sprintf(`from(bucket: "%s")
-	|> range(start: -24h)
-	|> filter(fn: (r) => r["_measurement"] == "http_download")
-	|> filter(fn: (r) => r["target"] == "%s")
-	|> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
-	|> sort(columns: ["_time"], desc: true)
-	|> limit(n: %d)`, s.bucket, targetName, limit)
+	// Standard range for recent measurements
+	return s.GetMeasurementsWithRange(targetName, "-24h", limit, false, "")
+}
+
+// GetMeasurementsWithRange allows fetching measurements with custom range and aggregation
+func (s *InfluxStorage) GetMeasurementsWithRange(targetName string, rangeStart string, limit int, aggregate bool, window string) ([]model.Measurement, error) {
+	var query string
+	if aggregate {
+		// Use aggregateWindow for downsampling
+		query = fmt.Sprintf(`from(bucket: "%s")
+		|> range(start: %s)
+		|> filter(fn: (r) => r["_measurement"] == "http_download")
+		|> filter(fn: (r) => r["target"] == "%s")
+		|> filter(fn: (r) => r["_field"] == "speed" or r["_field"] == "packet_loss" or r["_field"] == "status" or r["_field"] == "duration" or r["_field"] == "size")
+		|> aggregateWindow(every: %s, fn: mean, createEmpty: false)
+		|> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+		|> sort(columns: ["_time"], desc: true)
+		|> limit(n: %d)`, s.bucket, rangeStart, targetName, window, limit)
+	} else {
+		query = fmt.Sprintf(`from(bucket: "%s")
+		|> range(start: %s)
+		|> filter(fn: (r) => r["_measurement"] == "http_download")
+		|> filter(fn: (r) => r["target"] == "%s")
+		|> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
+		|> sort(columns: ["_time"], desc: true)
+		|> limit(n: %d)`, s.bucket, rangeStart, targetName, limit)
+	}
 
 	result, err := s.queryAPI.Query(context.Background(), query)
 	if err != nil {
@@ -84,12 +106,21 @@ func (s *InfluxStorage) GetMeasurements(targetName string, limit int) ([]model.M
 		}
 		if v, ok := r.ValueByKey("size").(int64); ok {
 			m.Size = v
+		} else if v, ok := r.ValueByKey("size").(float64); ok {
+			// Aggregation might turn int into float
+			m.Size = int64(v)
 		}
 		if v, ok := r.ValueByKey("speed").(float64); ok {
 			m.Speed = v
 		}
 		if v, ok := r.ValueByKey("status").(string); ok {
 			m.Status = v
+		}
+		if v, ok := r.ValueByKey("packet_loss").(float64); ok {
+			m.PacketLoss = v
+		}
+		if v, ok := r.ValueByKey("trace_output").(string); ok {
+			m.TraceOutput = v
 		}
 		measurements = append(measurements, m)
 	}

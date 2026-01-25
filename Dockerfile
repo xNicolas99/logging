@@ -16,8 +16,8 @@ FROM alpine:latest
 
 WORKDIR /app
 
-# Install certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates curl
+# Install certificates for HTTPS requests and mtr for traceroute
+RUN apk --no-cache add ca-certificates curl mtr
 
 COPY --from=builder /app/monitor .
 # We don't necessarily need to COPY config.json if we mount it, but it's a good fallback

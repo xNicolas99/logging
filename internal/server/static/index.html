@@ -94,23 +94,39 @@
 
         <!-- Logs -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold mb-4 border-b dark:border-gray-700 pb-2">Application Logs</h2>
-            <pre id="logs-area" class="bg-gray-50 dark:bg-gray-900 p-4 rounded h-64 overflow-y-auto text-xs font-mono logs-scroll"></pre>
+            <div class="flex justify-between items-center mb-4 border-b dark:border-gray-700 pb-2">
+                <h2 class="text-lg font-semibold">Application Logs</h2>
+                <button onclick="toggleLogs()" id="btn-toggle-logs" class="text-sm bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 px-3 py-1 rounded transition">Show Logs</button>
+            </div>
+            <div id="logs-container" class="hidden">
+                <pre id="logs-area" class="bg-gray-50 dark:bg-gray-900 p-4 rounded h-64 overflow-y-auto text-xs font-mono logs-scroll"></pre>
+            </div>
         </div>
 
     </div>
 
     <!-- Modal -->
     <div id="detailModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50 p-4 backdrop-blur-sm">
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-5xl max-h-[95vh] flex flex-col">
             <div class="p-4 border-b dark:border-gray-700 flex justify-between items-center">
                 <h3 id="modal-title" class="text-xl font-bold">Details</h3>
                 <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
+
+            <div class="p-4 bg-gray-50 dark:bg-gray-700 flex flex-wrap gap-2 justify-center border-b dark:border-gray-600">
+                <button onclick="setHistoryRange('8h')" class="history-btn px-3 py-1 rounded bg-white dark:bg-gray-800 shadow text-sm hover:bg-blue-50 dark:hover:bg-gray-600 transition" data-range="8h">8h</button>
+                <button onclick="setHistoryRange('24h')" class="history-btn px-3 py-1 rounded bg-white dark:bg-gray-800 shadow text-sm hover:bg-blue-50 dark:hover:bg-gray-600 transition" data-range="24h">24h</button>
+                <button onclick="setHistoryRange('7d')" class="history-btn px-3 py-1 rounded bg-white dark:bg-gray-800 shadow text-sm hover:bg-blue-50 dark:hover:bg-gray-600 transition" data-range="7d">7 Days</button>
+                <button onclick="setHistoryRange('30d')" class="history-btn px-3 py-1 rounded bg-white dark:bg-gray-800 shadow text-sm hover:bg-blue-50 dark:hover:bg-gray-600 transition" data-range="30d">30 Days</button>
+                <button onclick="setHistoryRange('365d')" class="history-btn px-3 py-1 rounded bg-white dark:bg-gray-800 shadow text-sm hover:bg-blue-50 dark:hover:bg-gray-600 transition" data-range="365d">1 Year</button>
+            </div>
+
             <div class="p-4 overflow-y-auto flex-1">
-                <canvas id="speedChart" class="w-full h-64 mb-6"></canvas>
+                <div class="h-80 mb-6">
+                    <canvas id="speedChart"></canvas>
+                </div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm text-left">
                         <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
@@ -119,6 +135,7 @@
                                 <th class="px-4 py-2">Duration (s)</th>
                                 <th class="px-4 py-2">Size (B)</th>
                                 <th class="px-4 py-2">Speed (B/s)</th>
+                                <th class="px-4 py-2">Loss %</th>
                                 <th class="px-4 py-2">Status</th>
                             </tr>
                         </thead>
@@ -178,6 +195,8 @@
 
         // --- App Logic ---
         let detailChart = null;
+        let currentDetailTarget = null;
+        let currentHistoryRange = '8h';
 
         async function loadTargets() {
             const res = await fetch('/api/targets');
@@ -339,28 +358,50 @@
         }
 
         async function showDetails(targetName) {
+            currentDetailTarget = targetName;
             document.getElementById('modal-title').innerText = targetName;
             const modal = document.getElementById('detailModal');
             modal.classList.remove('hidden');
             modal.classList.add('flex');
 
-            const res = await fetch(`/api/measurements?target=${encodeURIComponent(targetName)}&limit=50`);
-            const data = await res.json();
+            // Default range
+            setHistoryRange('8h');
+        }
 
-            // Populate Table
+        async function setHistoryRange(range) {
+            if (!currentDetailTarget) return;
+            currentHistoryRange = range;
+
+            // Update buttons state
+            document.querySelectorAll('.history-btn').forEach(btn => {
+                if (btn.dataset.range === range) {
+                    btn.classList.add('ring-2', 'ring-blue-500');
+                } else {
+                    btn.classList.remove('ring-2', 'ring-blue-500');
+                }
+            });
+
+            const res = await fetch(`/api/measurements?target=${encodeURIComponent(currentDetailTarget)}&range=${range}&limit=1000`);
+            const data = await res.json() || [];
+
+            // Populate Table (limit to last 50 for performance if list is long)
             const tbody = document.getElementById('detailTableBody');
             tbody.innerHTML = '';
-            data.forEach(m => {
+            const tableData = data.slice(0, 100); // Show recent 100 in table
+
+            tableData.forEach(m => {
                 const tr = document.createElement('tr');
                 const speedMB = (m.speed / 1024 / 1024).toFixed(2);
                 const statusColor = m.status === 'OK' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
+                const loss = m.packet_loss !== undefined ? m.packet_loss.toFixed(1) + '%' : '-';
 
                 tr.className = "hover:bg-gray-100 dark:hover:bg-gray-700 transition";
                 tr.innerHTML = `
                     <td class="px-4 py-2">${new Date(m.timestamp).toLocaleString()}</td>
-                    <td class="px-4 py-2">${m.duration.toFixed(3)}</td>
-                    <td class="px-4 py-2">${m.size}</td>
+                    <td class="px-4 py-2">${m.duration ? m.duration.toFixed(3) : '-'}</td>
+                    <td class="px-4 py-2">${m.size || '-'}</td>
                     <td class="px-4 py-2">${speedMB} MB/s</td>
+                    <td class="px-4 py-2">${loss}</td>
                     <td class="px-4 py-2 font-bold ${statusColor}">${m.status}</td>
                 `;
                 tbody.appendChild(tr);
@@ -378,24 +419,53 @@
             detailChart = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: chartData.map(d => new Date(d.timestamp).toLocaleTimeString()),
-                    datasets: [{
-                        label: 'Speed (MB/s)',
-                        data: chartData.map(d => d.speed / 1024 / 1024),
-                        borderColor: '#3b82f6',
-                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                        fill: true,
-                        tension: 0.3
-                    }]
+                    labels: chartData.map(d => new Date(d.timestamp).toLocaleString()),
+                    datasets: [
+                        {
+                            label: 'Speed (MB/s)',
+                            data: chartData.map(d => d.speed / 1024 / 1024),
+                            borderColor: '#3b82f6', // Blue
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            fill: true,
+                            tension: 0.1,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Packet Loss (%)',
+                            data: chartData.map(d => d.packet_loss || 0),
+                            borderColor: '#ef4444', // Red
+                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            fill: true,
+                            tension: 0.1,
+                            yAxisID: 'y1'
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
                     scales: {
                         y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: { display: true, text: 'Speed (MB/s)' },
                             beginAtZero: true,
                             grid: { color: gridColor },
                             ticks: { color: textColor }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: { display: true, text: 'Packet Loss (%)' },
+                            beginAtZero: true,
+                            grid: { drawOnChartArea: false }, // only want the grid lines for one axis to show up
+                            ticks: { color: '#ef4444' }
                         },
                         x: {
                             grid: { color: gridColor },
@@ -403,7 +473,21 @@
                         }
                     },
                     plugins: {
-                        legend: { labels: { color: textColor } }
+                        legend: { labels: { color: textColor } },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += context.parsed.y.toFixed(2);
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
                     }
                 }
             });
@@ -420,14 +504,31 @@
             if (e.target === this) closeModal();
         });
 
+        function toggleLogs() {
+            const container = document.getElementById('logs-container');
+            const btn = document.getElementById('btn-toggle-logs');
+            if (container.classList.contains('hidden')) {
+                container.classList.remove('hidden');
+                btn.innerText = 'Hide Logs';
+                loadLogs();
+            } else {
+                container.classList.add('hidden');
+                btn.innerText = 'Show Logs';
+            }
+        }
+
         // Initialize
         loadTargets();
-        loadLogs();
+        // loadLogs(); // Lazy load
         loadInterval();
 
         // Polling
         setInterval(loadTargets, 10000);
-        setInterval(loadLogs, 10000);
+        setInterval(() => {
+            if (!document.getElementById('logs-container').classList.contains('hidden')) {
+                loadLogs();
+            }
+        }, 10000);
 
     </script>
 </body>

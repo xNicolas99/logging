@@ -17,4 +17,6 @@ type Measurement struct {
 	Size      int64     `json:"size"`     // Bytes
 	Speed     float64   `json:"speed"`    // Bytes per second
 	Status    string    `json:"status"`   // "OK" or "ALERT"
+	PacketLoss float64  `json:"packet_loss"` // Percentage
+	TraceOutput string  `json:"trace_output,omitempty"` // Full mtr output
 }
