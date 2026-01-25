@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"log"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ type Monitor struct {
 	configPath string
 	collector  *collector.Collector
 	quit       chan struct{}
+	jobQueue   chan model.Target
 	running    bool
 	mu         sync.Mutex
 	wg         sync.WaitGroup
@@ -26,6 +28,7 @@ func NewMonitor(configPath string, cfg *config.Config, col *collector.Collector)
 		configPath: configPath,
 		collector:  col,
 		lastRun:    make(map[string]time.Time),
+		jobQueue:   make(chan model.Target, 100), // Buffer to allow some buildup
 	}
 }
 
@@ -39,10 +42,25 @@ func (m *Monitor) Start() {
 
 	m.quit = make(chan struct{})
 	m.running = true
-	m.wg.Add(1)
+	m.wg.Add(2) // runLoop + worker
+
+	// Start worker
+	go m.worker()
 
 	// Check every 10 seconds
 	go m.runLoop(10 * time.Second)
+}
+
+func (m *Monitor) worker() {
+	defer m.wg.Done()
+	for {
+		select {
+		case t := <-m.jobQueue:
+			m.collector.MeasureTarget(t)
+		case <-m.quit:
+			return
+		}
+	}
 }
 
 func (m *Monitor) runLoop(checkInterval time.Duration) {
@@ -65,6 +83,12 @@ func (m *Monitor) runLoop(checkInterval time.Duration) {
 
 func (m *Monitor) checkAndRun() {
 	m.mu.Lock()
+	// Early exit if stopping
+	if !m.running {
+		m.mu.Unlock()
+		return
+	}
+
 	targets := make([]model.Target, len(m.cfg.Targets))
 	copy(targets, m.cfg.Targets)
 	globalIntervalSec := m.cfg.Interval
@@ -90,13 +114,17 @@ func (m *Monitor) checkAndRun() {
 
 		if time.Since(last) >= interval {
 			// Trigger measurement
-			// Update lastRun immediately to prevent double triggering in next tick if measurement is slow
-			// (We assume it starts now)
+			// Update lastRun immediately to prevent double triggering
 			m.mu.Lock()
 			m.lastRun[t.Name] = time.Now()
 			m.mu.Unlock()
 
-			go m.collector.MeasureTarget(t)
+			// Enqueue
+			select {
+			case m.jobQueue <- t:
+			default:
+				log.Printf("Warning: Job queue full, skipping check for %s", t.Name)
+			}
 		}
 	}
 }
@@ -109,13 +137,19 @@ func (m *Monitor) Stop() {
 		return
 	}
 
-	close(m.quit)
 	m.running = false
+	close(m.quit)
+	// Do NOT close jobQueue. It prevents panic in concurrent writers.
+	// The worker will exit when it sees quit closed.
 }
 
 // RunNow triggers an immediate measurement for all targets.
 func (m *Monitor) RunNow() {
 	m.mu.Lock()
+	if !m.running {
+		m.mu.Unlock()
+		return
+	}
 	targets := make([]model.Target, len(m.cfg.Targets))
 	copy(targets, m.cfg.Targets)
 
@@ -127,7 +161,11 @@ func (m *Monitor) RunNow() {
 	m.mu.Unlock()
 
 	for _, t := range targets {
-		go m.collector.MeasureTarget(t)
+		select {
+		case m.jobQueue <- t:
+		default:
+			log.Printf("Warning: Job queue full, skipping manual run for %s", t.Name)
+		}
 	}
 }
 
