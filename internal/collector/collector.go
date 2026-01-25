@@ -2,7 +2,6 @@ package collector
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -266,62 +265,25 @@ func (c *Collector) runPing(ctx context.Context, host string) (loss float64, lat
 	return loss, latency, err
 }
 
-// runMTR executes mtr -j -c 10 <host> and returns loss percentage and full output
+// runMTR executes mtr --report -c 10 <host> and returns loss percentage and full text output
 func (c *Collector) runMTR(ctx context.Context, host string) (float64, string) {
 	// mtr needs root, usually available in docker
-	// -j: JSON output
+	// --report: Text report output
 	// -c 10: 10 cycles
-	// -w: report wide? -j implies report.
-	cmd := exec.CommandContext(ctx, "mtr", "--json", "-c", "10", host)
+	cmd := exec.CommandContext(ctx, "mtr", "--report", "-c", "10", host)
 	out, err := cmd.Output()
+	output := string(out)
 
 	// If MTR fails to run (e.g. not found), we return error string
 	if err != nil {
-		// It might return non-zero exit code if there is packet loss? MTR usually returns 0.
-		// If it failed, check stderr? `Output` captures stdout. `CombinedOutput` captures both.
-		// But for JSON parsing we want stdout.
-		return 0, fmt.Sprintf("MTR Execution Failed: %v", err)
+		// MTR might return non-zero if there is packet loss, but usually just works.
+		// If it failed to run (e.g. executable missing), err will be non-nil.
+		// If output is empty, it's a real failure.
+		if len(output) == 0 {
+			return 0, fmt.Sprintf("MTR Execution Failed: %v", err)
+		}
 	}
 
-	// Parse JSON to find loss of last hop
-	type MtrHop struct {
-		Count int     `json:"count"`
-		Loss  float64 `json:"Loss%"`
-		Host  string  `json:"host"`
-	}
-	type Root struct {
-		Report struct {
-			Hubs []MtrHop `json:"hubs"`
-		} `json:"report"`
-	}
-
-	var res Root
-	if err := json.Unmarshal(out, &res); err != nil {
-		// If not JSON, maybe raw text?
-		return 0, string(out)
-	}
-
-	hubs := res.Report.Hubs
-	if len(hubs) == 0 {
-		return 0, string(out)
-	}
-
-	// Last hop is destination
-	lastHop := hubs[len(hubs)-1]
-
-	// We return the raw JSON as output, OR a formatted table?
-	// User said "Log the full MTR output... I need to see where the packet loss happens."
-	// JSON is hard to read in logs. MTR can output text.
-	// But we use JSON to parse Loss programmatically.
-	// Can we run MTR with text output?
-	// Or just log the JSON.
-	// JSON is fine, user said "MTR output ... trace hops".
-	// If I log JSON, they can see hops.
-	// But `mtr -r` (report) gives nice text table.
-	// Maybe I should run `mtr -r` if I want readable logs?
-	// But I also need `Loss`.
-	// I can parse text report too, but JSON is safer.
-	// I will return the JSON string. It contains all hops.
-
-	return lastHop.Loss, string(out)
+	loss := parseMtrLoss(output)
+	return loss, output
 }
