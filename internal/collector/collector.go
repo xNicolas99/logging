@@ -183,7 +183,6 @@ func (c *Collector) runMTR(ctx context.Context, targetURL string) (float64, stri
 	cmd := exec.CommandContext(ctx, "mtr", "--json", "-c", "10", host)
 	out, err := cmd.Output()
 	if err != nil {
-		// If mtr fails (e.g. not installed or permission), return 0 loss and error as trace
 		return 0, fmt.Sprintf("MTR failed: %v", err)
 	}
 
