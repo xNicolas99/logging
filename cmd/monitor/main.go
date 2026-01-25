@@ -6,24 +6,44 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/jules/http-monitor/internal/collector"
 	"github.com/jules/http-monitor/internal/config"
 	"github.com/jules/http-monitor/internal/logger"
+	"github.com/jules/http-monitor/internal/monitor"
 	"github.com/jules/http-monitor/internal/server"
 	"github.com/jules/http-monitor/internal/storage"
 )
 
 func main() {
-	configPath := flag.String("config", "config.json", "Path to configuration file")
+	configPath := flag.String("config", "/app/data/config.json", "Path to configuration file")
 	flag.Parse()
 
 	// Load Configuration
-	cfg, err := config.LoadConfig(*configPath)
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+	var cfg *config.Config
+	var err error
+
+	if _, err := os.Stat(*configPath); os.IsNotExist(err) {
+		log.Printf("Config file not found at %s. Creating default.", *configPath)
+		cfg = config.DefaultConfig()
+
+		// Ensure directory exists
+		dir := filepath.Dir(*configPath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("Warning: Failed to create config directory %s: %v", dir, err)
+		} else {
+			if err := config.SaveConfig(*configPath, cfg); err != nil {
+				log.Printf("Warning: Failed to save default config: %v", err)
+			}
+		}
+	} else {
+		cfg, err = config.LoadConfig(*configPath)
+		if err != nil {
+			log.Fatalf("Failed to load config: %v", err)
+		}
 	}
 
 	// Override InfluxDB config from Env Vars (Docker Support)
@@ -87,30 +107,13 @@ func main() {
 	// Initialize Collector
 	col := collector.NewCollector(store, fileLogger)
 
-	// Start Background Collection
-	ticker := time.NewTicker(time.Duration(cfg.Interval) * time.Second)
-	quit := make(chan struct{})
-	go func() {
-		// Run once immediately
-		for _, t := range cfg.Targets {
-			go col.MeasureTarget(t)
-		}
-		for {
-			select {
-			case <-ticker.C:
-				for _, t := range cfg.Targets {
-					// Launch each measurement in a goroutine to avoid blocking
-					go col.MeasureTarget(t)
-				}
-			case <-quit:
-				ticker.Stop()
-				return
-			}
-		}
-	}()
+	// Initialize Monitor Service
+	mon := monitor.NewMonitor(*configPath, cfg, col)
+	mon.Start()
+	defer mon.Stop()
 
 	// Start Web Server
-	srv := server.NewServer(cfg, store, logPath)
+	srv := server.NewServer(cfg, store, mon, logPath)
 	go func() {
 		if err := srv.Start(8080); err != nil {
 			log.Fatalf("Server error: %v", err)
@@ -122,7 +125,6 @@ func main() {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	<-c
 	fmt.Println("\nShutting down...")
-	close(quit)
 	// Allow some time for cleanup if needed
 	time.Sleep(1 * time.Second)
 }
