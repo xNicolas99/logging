@@ -47,6 +47,14 @@ func main() {
 		}
 	}
 
+	// Ensure mandatory targets exist
+	if cfg.EnsureMandatoryTargets() {
+		log.Println("Added mandatory targets to config")
+		if err := config.SaveConfig(*configPath, cfg); err != nil {
+			log.Printf("Warning: Failed to save updated config: %v", err)
+		}
+	}
+
 	// Override InfluxDB config from Env Vars (Docker Support)
 	envURL := os.Getenv("INFLUX_URL")
 	envToken := os.Getenv("INFLUX_TOKEN")

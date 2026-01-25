@@ -40,6 +40,17 @@ func (l *FileLogger) Log(status, targetName string, duration float64, size int64
 	l.file.WriteString(line)
 }
 
+func (l *FileLogger) LogMTR(targetName, output string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	timestamp := time.Now().Format(time.RFC3339)
+	header := fmt.Sprintf("MTR REPORT [%s] [%s]\n", timestamp, targetName)
+	l.file.WriteString(header)
+	l.file.WriteString(output)
+	l.file.WriteString("\n--------------------------------------------------\n")
+}
+
 func (l *FileLogger) Close() {
 	l.file.Close()
 }
