@@ -4,173 +4,431 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HTTP Monitor</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
     <style>
-        .status-ok { color: green; font-weight: bold; }
-        .status-alert { color: red; font-weight: bold; }
-        .card { margin-bottom: 20px; }
+        /* Custom scrollbar for logs */
+        .logs-scroll::-webkit-scrollbar { width: 8px; }
+        .logs-scroll::-webkit-scrollbar-track { background: #f1f1f1; }
+        .logs-scroll::-webkit-scrollbar-thumb { background: #888; border-radius: 4px; }
+        .logs-scroll::-webkit-scrollbar-thumb:hover { background: #555; }
+
+        .dark .logs-scroll::-webkit-scrollbar-track { background: #2d3748; }
+        .dark .logs-scroll::-webkit-scrollbar-thumb { background: #4a5568; }
     </style>
 </head>
-<body class="bg-light">
+<body class="bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-100 transition-colors duration-200">
 
-<div class="container mt-4">
-    <h1>HTTP Monitor Dashboard</h1>
+    <!-- Navbar -->
+    <nav class="bg-white dark:bg-gray-800 shadow p-4 flex justify-between items-center sticky top-0 z-10">
+        <div class="flex items-center gap-4">
+            <h1 class="text-xl font-bold tracking-tight">HTTP Monitor</h1>
+            <span class="px-2 py-1 text-xs rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">v1.1</span>
+        </div>
+        <div class="flex items-center gap-4">
+            <button onclick="runTest()" id="btn-run" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded shadow transition flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+                </svg>
+                Run Test Now
+            </button>
+            <button onclick="toggleDarkMode()" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition" title="Toggle Dark Mode">
+                <!-- Sun Icon -->
+                <svg id="icon-sun" class="w-6 h-6 hidden" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
+                </svg>
+                <!-- Moon Icon -->
+                <svg id="icon-moon" class="w-6 h-6 block" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+                </svg>
+            </button>
+        </div>
+    </nav>
 
-    <div id="targets-container" class="row">
-        <!-- Targets will be loaded here -->
-    </div>
+    <div class="container mx-auto p-4 max-w-6xl">
 
-    <div class="mt-4">
-        <h3>Recent Log Entries</h3>
-        <pre id="logs-area" class="bg-white p-3 border" style="max-height: 300px; overflow-y: scroll;"></pre>
-    </div>
-</div>
+        <!-- Targets Grid -->
+        <div id="targets-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+            <!-- Cards injected by JS -->
+        </div>
 
-<!-- Modal for details -->
-<div class="modal fade" id="detailModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="detailModalLabel">Measurement Details</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <!-- Management Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+
+            <!-- Add Target -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold mb-4 border-b dark:border-gray-700 pb-2">Add New Target</h2>
+                <form onsubmit="addTarget(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Name</label>
+                        <input type="text" id="target-name" class="w-full rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-gray-50 dark:bg-gray-700 p-2" required placeholder="e.g. Google">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">URL</label>
+                        <input type="url" id="target-url" class="w-full rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-gray-50 dark:bg-gray-700 p-2" required placeholder="https://google.com">
+                    </div>
+                    <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 rounded shadow transition">Add Target</button>
+                </form>
             </div>
-            <div class="modal-body">
-                <canvas id="speedChart"></canvas>
-                <div class="table-responsive mt-3">
-                    <table class="table table-sm">
-                        <thead>
+
+            <!-- Settings -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold mb-4 border-b dark:border-gray-700 pb-2">Settings</h2>
+                <form onsubmit="saveInterval(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Measurement Interval (minutes)</label>
+                        <div class="flex gap-2">
+                            <input type="number" id="settings-interval" min="3" class="w-full rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-gray-50 dark:bg-gray-700 p-2" required>
+                            <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded shadow transition whitespace-nowrap">Save</button>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Minimum 3 minutes.</p>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Logs -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold mb-4 border-b dark:border-gray-700 pb-2">Application Logs</h2>
+            <pre id="logs-area" class="bg-gray-50 dark:bg-gray-900 p-4 rounded h-64 overflow-y-auto text-xs font-mono logs-scroll"></pre>
+        </div>
+
+    </div>
+
+    <!-- Modal -->
+    <div id="detailModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50 p-4 backdrop-blur-sm">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div class="p-4 border-b dark:border-gray-700 flex justify-between items-center">
+                <h3 id="modal-title" class="text-xl font-bold">Details</h3>
+                <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="p-4 overflow-y-auto flex-1">
+                <canvas id="speedChart" class="w-full h-64 mb-6"></canvas>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left">
+                        <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
                             <tr>
-                                <th>Time</th>
-                                <th>Duration (s)</th>
-                                <th>Size (B)</th>
-                                <th>Speed (B/s)</th>
-                                <th>Status</th>
+                                <th class="px-4 py-2">Time</th>
+                                <th class="px-4 py-2">Duration (s)</th>
+                                <th class="px-4 py-2">Size (B)</th>
+                                <th class="px-4 py-2">Speed (B/s)</th>
+                                <th class="px-4 py-2">Status</th>
                             </tr>
                         </thead>
-                        <tbody id="detailTableBody"></tbody>
+                        <tbody id="detailTableBody" class="divide-y divide-gray-200 dark:divide-gray-700"></tbody>
                     </table>
                 </div>
             </div>
+            <div class="p-4 border-t dark:border-gray-700 text-right">
+                <button onclick="closeModal()" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded">Close</button>
+            </div>
         </div>
     </div>
-</div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script>
-    let targets = [];
-    let charts = {};
-
-    async function loadTargets() {
-        const res = await fetch('/api/targets');
-        targets = await res.json();
-        const container = document.getElementById('targets-container');
-        container.innerHTML = '';
-
-        for (const t of targets) {
-            // Fetch latest measurement for overview
-            const mRes = await fetch(`/api/measurements?target=${t.name}&limit=1`);
-            const measurements = await mRes.json();
-            const last = measurements.length > 0 ? measurements[0] : null;
-
-            const card = document.createElement('div');
-            card.className = 'col-md-4';
-            let statusClass = 'text-muted';
-            let statusText = 'No Data';
-            let speedText = '-';
-            let lastTime = '-';
-
-            if (last) {
-                statusClass = last.status === 'OK' ? 'status-ok' : 'status-alert';
-                statusText = last.status;
-                speedText = (last.speed / 1024).toFixed(2) + ' KB/s';
-                lastTime = new Date(last.timestamp).toLocaleTimeString();
+    <script>
+        // --- Dark Mode ---
+        function initDarkMode() {
+            if (localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
+                updateIcons(true);
+            } else {
+                document.documentElement.classList.remove('dark');
+                updateIcons(false);
             }
-
-            card.innerHTML = `
-                <div class="card shadow-sm">
-                    <div class="card-body">
-                        <h5 class="card-title">${t.name}</h5>
-                        <p class="card-text text-truncate" title="${t.url}">${t.url}</p>
-                        <hr>
-                        <p>Status: <span class="${statusClass}">${statusText}</span></p>
-                        <p>Speed: <strong>${speedText}</strong></p>
-                        <p class="text-muted small">Last: ${lastTime}</p>
-                        <button class="btn btn-primary btn-sm" onclick="showDetails('${t.name}')">Details</button>
-                    </div>
-                </div>
-            `;
-            container.appendChild(card);
         }
-    }
 
-    let detailChart = null;
-
-    async function showDetails(targetName) {
-        const modal = new bootstrap.Modal(document.getElementById('detailModal'));
-        document.getElementById('detailModalLabel').innerText = `Measurements: ${targetName}`;
-
-        const res = await fetch(`/api/measurements?target=${targetName}&limit=50`);
-        const data = await res.json();
-
-        // Populate Table
-        const tbody = document.getElementById('detailTableBody');
-        tbody.innerHTML = '';
-        data.forEach(m => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td>${new Date(m.timestamp).toLocaleString()}</td>
-                <td>${m.duration.toFixed(3)}</td>
-                <td>${m.size}</td>
-                <td>${m.speed.toFixed(0)}</td>
-                <td class="${m.status === 'OK' ? 'status-ok' : 'status-alert'}">${m.status}</td>
-            `;
-            tbody.appendChild(tr);
-        });
-
-        // Populate Chart
-        const ctx = document.getElementById('speedChart').getContext('2d');
-        if (detailChart) detailChart.destroy();
-
-        // Data comes newest first, reverse for chart
-        const chartData = [...data].reverse();
-
-        detailChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: chartData.map(d => new Date(d.timestamp).toLocaleTimeString()),
-                datasets: [{
-                    label: 'Speed (B/s)',
-                    data: chartData.map(d => d.speed),
-                    borderColor: 'blue',
-                    tension: 0.1
-                }]
-            },
-            options: {
-                responsive: true,
-                scales: {
-                    y: { beginAtZero: true }
-                }
+        function toggleDarkMode() {
+            if (document.documentElement.classList.contains('dark')) {
+                document.documentElement.classList.remove('dark');
+                localStorage.setItem('theme', 'light');
+                updateIcons(false);
+            } else {
+                document.documentElement.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+                updateIcons(true);
             }
+            // Update chart if visible
+            if (!document.getElementById('detailModal').classList.contains('hidden')) {
+               const title = document.getElementById('modal-title').innerText;
+               if (title && title !== 'Details') showDetails(title);
+            }
+        }
+
+        function updateIcons(isDark) {
+            const sun = document.getElementById('icon-sun');
+            const moon = document.getElementById('icon-moon');
+            if (isDark) {
+                sun.classList.remove('hidden');
+                moon.classList.add('hidden');
+            } else {
+                sun.classList.add('hidden');
+                moon.classList.remove('hidden');
+            }
+        }
+
+        initDarkMode();
+
+
+        // --- App Logic ---
+        let detailChart = null;
+
+        async function loadTargets() {
+            const res = await fetch('/api/targets');
+            const targets = await res.json();
+            const container = document.getElementById('targets-container');
+            container.innerHTML = '';
+
+            for (const t of targets) {
+                // Fetch latest measurement for overview
+                const mRes = await fetch(`/api/measurements?target=${encodeURIComponent(t.name)}&limit=1`);
+                const measurements = await mRes.json() || [];
+                const last = measurements.length > 0 ? measurements[0] : null;
+
+                let statusColor = 'text-gray-500';
+                let statusBg = 'bg-gray-100 dark:bg-gray-700';
+                let statusText = 'No Data';
+                let speedText = '-';
+                let lastTime = '-';
+
+                if (last) {
+                    if (last.status === 'OK') {
+                        statusColor = 'text-green-700 dark:text-green-400';
+                        statusBg = 'bg-green-100 dark:bg-green-900/30';
+                    } else {
+                        statusColor = 'text-red-700 dark:text-red-400';
+                        statusBg = 'bg-red-100 dark:bg-red-900/30';
+                    }
+                    statusText = last.status;
+                    speedText = (last.speed / 1024 / 1024).toFixed(2) + ' MB/s';
+                    lastTime = new Date(last.timestamp).toLocaleTimeString();
+                }
+
+                const card = document.createElement('div');
+                card.className = 'bg-white dark:bg-gray-800 rounded-lg shadow hover:shadow-md transition duration-200 overflow-hidden flex flex-col';
+                card.innerHTML = `
+                    <div class="p-5 flex-1">
+                        <div class="flex justify-between items-start mb-2">
+                            <h3 class="font-bold text-lg truncate" title="${t.name}">${t.name}</h3>
+                            <span class="px-2 py-1 rounded text-xs font-bold ${statusColor} ${statusBg}">${statusText}</span>
+                        </div>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 truncate mb-4" title="${t.url}">${t.url}</p>
+
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <span class="block text-gray-500 dark:text-gray-400 text-xs uppercase">Speed</span>
+                                <span class="font-semibold text-lg">${speedText}</span>
+                            </div>
+                            <div>
+                                <span class="block text-gray-500 dark:text-gray-400 text-xs uppercase">Last Run</span>
+                                <span class="font-medium">${lastTime}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-gray-50 dark:bg-gray-700/50 p-3 border-t dark:border-gray-700 text-center">
+                        <button onclick="showDetails('${t.name}')" class="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 text-sm font-medium">View History &rarr;</button>
+                    </div>
+                `;
+                container.appendChild(card);
+            }
+        }
+
+        async function runTest() {
+            const btn = document.getElementById('btn-run');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = 'Starting...';
+            btn.disabled = true;
+            btn.classList.add('opacity-75', 'cursor-not-allowed');
+
+            try {
+                const res = await fetch('/api/run', { method: 'POST' });
+                if (res.ok) {
+                    setTimeout(() => {
+                        loadTargets();
+                        loadLogs();
+                    }, 2000);
+                } else {
+                    alert('Failed to start test');
+                }
+            } catch (e) {
+                console.error(e);
+                alert('Error starting test');
+            } finally {
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-75', 'cursor-not-allowed');
+                }, 1000);
+            }
+        }
+
+        async function loadInterval() {
+            try {
+                const res = await fetch('/api/config/interval');
+                const data = await res.json();
+                document.getElementById('settings-interval').value = data.interval;
+            } catch (e) {
+                console.error('Failed to load interval', e);
+            }
+        }
+
+        async function saveInterval(e) {
+            e.preventDefault();
+            const val = parseInt(document.getElementById('settings-interval').value);
+            if (val < 3) {
+                alert("Minimum 3 minutes required.");
+                return;
+            }
+            try {
+                const res = await fetch('/api/config/interval', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ interval: val })
+                });
+                if (res.ok) {
+                    alert('Interval saved!');
+                } else {
+                    alert('Failed to save interval.');
+                }
+            } catch (e) {
+                alert('Error saving interval.');
+            }
+        }
+
+        async function addTarget(e) {
+            e.preventDefault();
+            const name = document.getElementById('target-name').value;
+            const url = document.getElementById('target-url').value;
+
+            try {
+                const res = await fetch('/api/targets', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ name, url })
+                });
+                if (res.ok) {
+                    document.getElementById('target-name').value = '';
+                    document.getElementById('target-url').value = '';
+                    loadTargets();
+                    alert('Target added!');
+                } else {
+                    alert('Failed to add target.');
+                }
+            } catch (e) {
+                alert('Error adding target.');
+            }
+        }
+
+        async function loadLogs() {
+            try {
+                const res = await fetch('/logs');
+                const text = await res.text();
+                const area = document.getElementById('logs-area');
+                area.innerText = text;
+                // area.scrollTop = area.scrollHeight; // removed auto scroll to bottom to annoy less if reading?
+                // But usually one wants to see latest.
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function showDetails(targetName) {
+            document.getElementById('modal-title').innerText = targetName;
+            const modal = document.getElementById('detailModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+
+            const res = await fetch(`/api/measurements?target=${encodeURIComponent(targetName)}&limit=50`);
+            const data = await res.json();
+
+            // Populate Table
+            const tbody = document.getElementById('detailTableBody');
+            tbody.innerHTML = '';
+            data.forEach(m => {
+                const tr = document.createElement('tr');
+                const speedMB = (m.speed / 1024 / 1024).toFixed(2);
+                const statusColor = m.status === 'OK' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
+
+                tr.className = "hover:bg-gray-100 dark:hover:bg-gray-700 transition";
+                tr.innerHTML = `
+                    <td class="px-4 py-2">${new Date(m.timestamp).toLocaleString()}</td>
+                    <td class="px-4 py-2">${m.duration.toFixed(3)}</td>
+                    <td class="px-4 py-2">${m.size}</td>
+                    <td class="px-4 py-2">${speedMB} MB/s</td>
+                    <td class="px-4 py-2 font-bold ${statusColor}">${m.status}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            // Populate Chart
+            const ctx = document.getElementById('speedChart').getContext('2d');
+            if (detailChart) detailChart.destroy();
+
+            const chartData = [...data].reverse();
+            const isDark = document.documentElement.classList.contains('dark');
+            const gridColor = isDark ? '#4a5568' : '#e5e7eb';
+            const textColor = isDark ? '#cbd5e0' : '#4b5563';
+
+            detailChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartData.map(d => new Date(d.timestamp).toLocaleTimeString()),
+                    datasets: [{
+                        label: 'Speed (MB/s)',
+                        data: chartData.map(d => d.speed / 1024 / 1024),
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: gridColor },
+                            ticks: { color: textColor }
+                        },
+                        x: {
+                            grid: { color: gridColor },
+                            ticks: { color: textColor }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: textColor } }
+                    }
+                }
+            });
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('detailModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        // Close modal on click outside
+        document.getElementById('detailModal').addEventListener('click', function(e) {
+            if (e.target === this) closeModal();
         });
 
-        modal.show();
-    }
+        // Initialize
+        loadTargets();
+        loadLogs();
+        loadInterval();
 
-    async function loadLogs() {
-        const res = await fetch('/logs');
-        const text = await res.text();
-        document.getElementById('logs-area').innerText = text;
-    }
+        // Polling
+        setInterval(loadTargets, 10000);
+        setInterval(loadLogs, 10000);
 
-    // Initial load
-    loadTargets();
-    loadLogs();
-
-    // Auto refresh
-    setInterval(loadTargets, 10000);
-    setInterval(loadLogs, 10000);
-</script>
-
+    </script>
 </body>
 </html>
