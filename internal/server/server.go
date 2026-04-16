@@ -203,20 +203,9 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Simple tail implementation: read last 100 lines
-	var lines []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-
-	start := 0
-	if len(lines) > 100 {
-		start = len(lines) - 100
-	}
-
 	w.Header().Set("Content-Type", "text/plain")
-	for i := start; i < len(lines); i++ {
-		fmt.Fprintln(w, lines[i])
+	if err := tailLog(file, w, 100); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 }
