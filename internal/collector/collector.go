@@ -17,6 +17,11 @@ import (
 	"github.com/jules/http-monitor/internal/storage"
 )
 
+var (
+	reLoss = regexp.MustCompile(`(\d+)% packet loss`)
+	reLat  = regexp.MustCompile(`min/avg/max(?:/\w+)?\s+=\s+[\d.]+/([\d.]+)/`)
+)
+
 // Collector handles the measurement logic.
 type Collector struct {
 	storage storage.Storage
@@ -242,7 +247,6 @@ func (c *Collector) runPing(ctx context.Context, host string) (loss float64, lat
 	// Parse Loss
 	// "5 packets transmitted, 5 packets received, 0% packet loss"
 	// "5 packets transmitted, 0 packets received, 100% packet loss"
-	reLoss := regexp.MustCompile(`(\d+)% packet loss`)
 	matchesLoss := reLoss.FindStringSubmatch(output)
 	if len(matchesLoss) > 1 {
 		if val, e := strconv.ParseFloat(matchesLoss[1], 64); e == nil {
@@ -254,7 +258,6 @@ func (c *Collector) runPing(ctx context.Context, host string) (loss float64, lat
 	// "round-trip min/avg/max/stddev = 16.452/16.518/16.565/0.038 ms" (Linux iputils)
 	// "round-trip min/avg/max = 20.1/20.5/21.2 ms" (Busybox/Alpine)
 	// We look for "min/avg/max" followed optionally by "/stddev" or "/mdev"
-	reLat := regexp.MustCompile(`min/avg/max(?:/\w+)?\s+=\s+[\d.]+/([\d.]+)/`)
 	matchesLat := reLat.FindStringSubmatch(output)
 	if len(matchesLat) > 1 {
 		if val, e := strconv.ParseFloat(matchesLat[1], 64); e == nil {
