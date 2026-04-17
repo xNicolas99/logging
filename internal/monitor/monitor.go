@@ -221,6 +221,6 @@ func (m *Monitor) SetInterval(minutes int) error {
 	err := config.SaveConfig(m.configPath, m.cfg)
 	m.mu.Unlock()
 
-    // No need to restart loop, it picks up new interval in next tick
+	// No need to restart loop, it picks up new interval in next tick
 	return err
 }
