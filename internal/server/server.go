@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bufio"
 	"embed"
 	"encoding/json"
 	"fmt"
