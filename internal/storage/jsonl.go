@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"sync"
@@ -68,9 +69,16 @@ func (s *JSONLStorage) GetMeasurements(targetName string, limit int) ([]model.Me
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, maxCapacity)
 
+	targetBytes := []byte(`"target":"` + targetName + `"`)
 	for scanner.Scan() {
+		line := scanner.Bytes()
+		// Fast-path filter: skip lines that definitely don't belong to this target
+		if !bytes.Contains(line, targetBytes) {
+			continue
+		}
+
 		var m model.Measurement
-		if err := json.Unmarshal(scanner.Bytes(), &m); err != nil {
+		if err := json.Unmarshal(line, &m); err != nil {
 			continue // skip malformed lines
 		}
 		if m.Target == targetName {
