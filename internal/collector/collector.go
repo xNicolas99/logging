@@ -231,12 +231,6 @@ func (c *Collector) MeasureTarget(t model.Target) {
 	}
 }
 
-func (c *Collector) logError(t model.Target, err error, loss float64, traceOutput string) {
-	// Not used anymore in revised flow, but keeping for compatibility if needed or removed?
-	// I removed calls to it in MeasureTarget. I can remove the method or keep it.
-	// It's private, I'll remove it or update it. I'll just remove/ignore it in this rewrite.
-}
-
 // runPing executes ping -c 5 -i 0.2 <host>
 func (c *Collector) runPing(ctx context.Context, host string) (loss float64, latency float64, err error) {
 	cmd := exec.CommandContext(ctx, "ping", "-c", "5", "-i", "0.2", host)
