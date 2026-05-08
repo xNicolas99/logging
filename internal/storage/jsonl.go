@@ -85,13 +85,14 @@ func (s *JSONLStorage) GetMeasurements(targetName string, limit int) ([]model.Me
 		// In a real logger we would log this.
 	}
 
+	// Truncate to limit before reversing to save CPU cycles
+	if len(measurements) > limit {
+		measurements = measurements[len(measurements)-limit:]
+	}
+
 	// Reverse to get latest first
 	for i, j := 0, len(measurements)-1; i < j; i, j = i+1, j-1 {
 		measurements[i], measurements[j] = measurements[j], measurements[i]
-	}
-
-	if len(measurements) > limit {
-		measurements = measurements[:limit]
 	}
 
 	return measurements, nil
