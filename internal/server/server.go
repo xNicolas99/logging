@@ -59,6 +59,8 @@ func (s *Server) Start(port int) error {
 	return http.ListenAndServe(addr, nil)
 }
 
+var nameRegex = regexp.MustCompile(`^[a-zA-Z0-9 ._-]+$`)
+
 func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var req struct {
@@ -70,10 +72,23 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
+		// Validation
 		if req.Name == "" || req.URL == "" {
 			http.Error(w, "Name and URL required", http.StatusBadRequest)
 			return
 		}
+		if !nameRegex.MatchString(req.Name) {
+			http.Error(w, "Invalid target name. Only alphanumeric, space, dot, underscore, and hyphen allowed.", http.StatusBadRequest)
+			return
+		}
+		u, err := url.Parse(req.URL)
+		if err != nil || !u.IsAbs() || (u.Scheme != "http" && u.Scheme != "https") {
+			http.Error(w, "Invalid URL. Must be an absolute HTTP or HTTPS URL.", http.StatusBadRequest)
+			return
+		}
+		if req.Interval < 0 {
+			http.Error(w, "Interval cannot be negative", http.StatusBadRequest)
 
 		// Security Validation
 		if !validName.MatchString(req.Name) {
