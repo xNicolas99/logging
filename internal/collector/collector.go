@@ -126,64 +126,14 @@ func (c *Collector) MeasureTarget(t model.Target) {
 	}
 
 	// Logic Branching
-	runMtr := false
-	status := "OK"
-
-	if isSpeedTest {
-		// Speed Test Logic
-		// Trigger MTR if Speed < Threshold OR HTTP Failed
-		if dlErr != nil || statusCode != 200 {
-			runMtr = true
-			status = "ALERT"
-		}
-		if speed < t.Threshold {
-			status = "ALERT"
-			runMtr = true // Optional: Run MTR to debug slow speed?
-			// User said "Speed Tests... Behalte die bestehende Logik".
-			// Existing logic was "runMtr = true if isSpeedTest" (ALWAYS run MTR for Speed Test in original code?
-			// Wait, original code:
-			// if isSpeedTest { runMtr = true } else if ...
-			// So it ALWAYS ran MTR for speed tests.
-			// User said "The latency values are still unrealistic... overhead is blocking...".
-			// But for Speed Tests, maybe they want MTR?
-			// "For standard Web Checks (IsSpeedTest=false), do NOT run MTR... Only do a simple HTTP/Ping check."
-			// Implicitly, for Speed Tests, we might still run MTR or only if slow.
-			// "Speed Tests ... Behalte die bestehende Logik".
-			// Existing logic ran MTR every time for SpeedTest.
-			// I will keep it running every time for SpeedTest if that's what "existing logic" means.
-			runMtr = true
-		}
-	} else {
-		// Web Check Logic
-		// 1. Run Ping
+	if !isSpeedTest {
+		// Web Check Logic: Run Ping
 		ctxPing, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
-		pLoss, pLat, pErr := c.runPing(ctxPing, host)
+		pingLoss, pingLatency, _ = c.runPing(ctxPing, host)
 		cancelPing()
-
-		pingLoss = pLoss
-		pingLatency = pLat
-
-		if pErr != nil {
-			// Ping command failed to run or parse
-			// We might assume it's bad.
-			// If ping failed completely (e.g. timeout), packet loss is likely 100%
-		}
-
-		// Trigger MTR if:
-		// 1. HTTP Failed (Status != 200 or Error)
-		// 2. Ping Packet Loss > 0%
-		// 3. Ping Latency > 100ms
-		if dlErr != nil || statusCode != 200 {
-			runMtr = true
-			status = "ALERT"
-		} else if pingLoss > 0 {
-			runMtr = true
-			status = "ALERT"
-		} else if pingLatency > 100 {
-			runMtr = true
-			status = "ALERT"
-		}
 	}
+
+	status, runMtr := determineStatusAndMTR(isSpeedTest, dlErr, statusCode, speed, t.Threshold, pingLoss, pingLatency)
 
 	if runMtr {
 		ctxMtr, cancelMtr := context.WithTimeout(context.Background(), 20*time.Second)
@@ -231,10 +181,21 @@ func (c *Collector) MeasureTarget(t model.Target) {
 	}
 }
 
-func (c *Collector) logError(t model.Target, err error, loss float64, traceOutput string) {
-	// Not used anymore in revised flow, but keeping for compatibility if needed or removed?
-	// I removed calls to it in MeasureTarget. I can remove the method or keep it.
-	// It's private, I'll remove it or update it. I'll just remove/ignore it in this rewrite.
+// determineStatusAndMTR decides if the measurement is an ALERT and if MTR should be run.
+func determineStatusAndMTR(isSpeedTest bool, dlErr error, statusCode int, speed, threshold, pingLoss, pingLatency float64) (string, bool) {
+	if isSpeedTest {
+		// For Speed Tests, trigger MTR if HTTP fails, status is not 200, or speed is below threshold.
+		if dlErr != nil || statusCode != 200 || speed < threshold {
+			return "ALERT", true
+		}
+		return "OK", false
+	}
+
+	// For Web Checks, trigger MTR if HTTP fails, status is not 200, ping loss occurs, or ping latency is high.
+	if dlErr != nil || statusCode != 200 || pingLoss > 0 || pingLatency > 100 {
+		return "ALERT", true
+	}
+	return "OK", false
 }
 
 // runPing executes ping -c 5 -i 0.2 <host>

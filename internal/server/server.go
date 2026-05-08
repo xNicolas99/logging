@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bufio"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -20,6 +19,10 @@ import (
 
 //go:embed static/*
 var staticFiles embed.FS
+
+var (
+	validName = regexp.MustCompile(`^[a-zA-Z0-9 ._-]+$`)
+)
 
 type Server struct {
 	cfg     *config.Config
@@ -86,6 +89,19 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Interval < 0 {
 			http.Error(w, "Interval cannot be negative", http.StatusBadRequest)
+
+		// Security Validation
+		if !validName.MatchString(req.Name) {
+			http.Error(w, "Invalid target name", http.StatusBadRequest)
+			return
+		}
+		u, err := url.ParseRequestURI(req.URL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			http.Error(w, "Invalid target URL", http.StatusBadRequest)
+			return
+		}
+		if req.Interval < 0 {
+			http.Error(w, "Invalid interval", http.StatusBadRequest)
 			return
 		}
 
@@ -101,6 +117,10 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Query().Get("name")
 		if name == "" {
 			http.Error(w, "Name required", http.StatusBadRequest)
+			return
+		}
+		if !validName.MatchString(name) {
+			http.Error(w, "Invalid target name", http.StatusBadRequest)
 			return
 		}
 		if err := s.monitor.DeleteTarget(name); err != nil {
@@ -199,6 +219,10 @@ func (s *Server) handleInterval(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Interval < 1 {
+			http.Error(w, "Interval must be at least 1 minute", http.StatusBadRequest)
 			return
 		}
 		if err := s.monitor.SetInterval(req.Interval); err != nil {

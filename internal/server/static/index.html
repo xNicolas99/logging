@@ -218,6 +218,21 @@
 
 
         // --- App Logic ---
+
+        function escapeHTML(str) {
+            if (!str) return '';
+            return str.replace(/[&<>"']/g, function(m) {
+                switch (m) {
+                    case '&': return '&amp;';
+                    case '<': return '&lt;';
+                    case '>': return '&gt;';
+                    case '"': return '&quot;';
+                    case "'": return '&#039;';
+                    default: return m;
+                }
+            });
+        }
+
         let detailChart = null;
         let currentDetailTarget = null;
         let currentHistoryRange = '8h';
@@ -230,6 +245,9 @@
             container.innerHTML = '';
 
             for (const t of targets) {
+                const safeName = escapeHTML(t.name);
+                const safeURL = escapeHTML(t.url);
+
                 // Fetch latest measurement for overview
                 const mRes = await fetch(`/api/measurements?target=${encodeURIComponent(t.name)}&limit=1`);
                 const measurements = await mRes.json() || [];
@@ -276,6 +294,10 @@
                 deleteBtn.className = 'absolute top-2 right-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition p-1';
                 deleteBtn.title = 'Delete Target';
                 deleteBtn.addEventListener('click', () => deleteTarget(t.name));
+                // Using a more secure way for the button onclick
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'absolute top-2 right-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition p-1';
+                deleteBtn.title = 'Delete Target';
                 deleteBtn.innerHTML = `
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -341,6 +363,41 @@
 
                 footer.appendChild(detailsBtn);
                 card.appendChild(footer);
+                `;
+                deleteBtn.onclick = () => deleteTarget(t.name);
+                card.appendChild(deleteBtn);
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'p-5 flex-1';
+                contentDiv.innerHTML = `
+                    <div class="flex justify-between items-start mb-2 pr-6">
+                        <h3 class="font-bold text-lg truncate" title="${safeName}">${safeName}</h3>
+                        <span class="px-2 py-1 rounded text-xs font-bold ${statusColor} ${statusBg}">${statusText}</span>
+                    </div>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 truncate mb-4" title="${safeURL}">${safeURL}</p>
+
+                    <div class="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                            <span class="block text-gray-500 dark:text-gray-400 text-xs uppercase">${labelText}</span>
+                            <span class="${primaryClass}">${primaryText}</span>
+                            <span class="block text-xs text-gray-400">${secondaryText}</span>
+                        </div>
+                        <div>
+                            <span class="block text-gray-500 dark:text-gray-400 text-xs uppercase">Last Run</span>
+                            <span class="font-medium">${lastTime}</span>
+                        </div>
+                    </div>
+                `;
+                card.appendChild(contentDiv);
+
+                const footerDiv = document.createElement('div');
+                footerDiv.className = 'bg-gray-50 dark:bg-gray-700/50 p-3 border-t dark:border-gray-700 text-center';
+                const historyBtn = document.createElement('button');
+                historyBtn.className = 'text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 text-sm font-medium';
+                historyBtn.innerHTML = 'View History &rarr;';
+                historyBtn.onclick = () => showDetails(t.name);
+                footerDiv.appendChild(historyBtn);
+                card.appendChild(footerDiv);
 
                 container.appendChild(card);
             }
@@ -457,7 +514,7 @@
                 const res = await fetch('/logs');
                 const text = await res.text();
                 const area = document.getElementById('logs-area');
-                area.innerText = text;
+                area.textContent = text;
             } catch (e) {
                 console.error(e);
             }
@@ -465,7 +522,7 @@
 
         async function showDetails(targetName) {
             currentDetailTarget = targetName;
-            document.getElementById('modal-title').innerText = targetName;
+            document.getElementById('modal-title').textContent = targetName;
             const modal = document.getElementById('detailModal');
             modal.classList.remove('hidden');
             modal.classList.add('flex');
