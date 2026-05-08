@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"sync"
 
@@ -43,14 +44,15 @@ func (s *JSONLStorage) SaveMeasurement(m model.Measurement) error {
 	return nil
 }
 
-// GetMeasurements reads the file and returns the last limit measurements for the target.
-// Note: This is a naive implementation that reads the whole file. For large files, seeking from end would be better.
+// GetMeasurements reads the file backwards and returns the last limit measurements for the target.
 func (s *JSONLStorage) GetMeasurements(targetName string, limit int) ([]model.Measurement, error) {
+	if limit <= 0 {
+		return []model.Measurement{}, nil
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// We need to read from the file. The file handle we have is open for append/write only.
-	// So we open a new reader.
 	f, err := os.Open(s.filepath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -60,15 +62,29 @@ func (s *JSONLStorage) GetMeasurements(targetName string, limit int) ([]model.Me
 	}
 	defer f.Close()
 
+	stat, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	size := stat.Size()
+	if size == 0 {
+		return []model.Measurement{}, nil
+	}
+
 	var measurements []model.Measurement
-	scanner := bufio.NewScanner(f)
 
-	// Increase buffer size to handle potentially large lines (e.g. extensive trace output)
-	// Default is 64KB, which might be exceeded by large MTR JSON output.
-	const maxCapacity = 10 * 1024 * 1024 // 10MB
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, maxCapacity)
+	const chunkSize = 64 * 1024          // 64KB
+	const maxLineSize = 10 * 1024 * 1024 // 10MB limit for safety to prevent huge allocations
 
+	buffer := make([]byte, chunkSize)
+	var leftover []byte // Holds data for the current line being assembled
+	var pos int64 = size
+
+	for pos > 0 && len(measurements) < limit {
+		move := int64(chunkSize)
+		if pos < move {
+			move = pos
 	targetBytes := []byte(`"target":"` + targetName + `"`)
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -81,25 +97,80 @@ func (s *JSONLStorage) GetMeasurements(targetName string, limit int) ([]model.Me
 		if err := json.Unmarshal(line, &m); err != nil {
 			continue // skip malformed lines
 		}
-		if m.Target == targetName {
-			measurements = append(measurements, m)
+		pos -= move
+
+		if _, err := f.Seek(pos, io.SeekStart); err != nil {
+			break
+		}
+
+		n, err := f.Read(buffer[:move])
+		if err != nil && err != io.EOF {
+			break
+		}
+
+		chunk := buffer[:n]
+
+		// Process the chunk from end to beginning
+		for {
+			idx := bytes.LastIndexByte(chunk, '\n')
+			if idx == -1 {
+				// No newline found, prepend the whole chunk to leftover
+				// Check for max line size
+				if len(leftover)+len(chunk) > maxLineSize {
+					// Skip this malformed/huge line, reset leftover
+					leftover = nil
+				} else {
+					// prepend
+					newLeftover := make([]byte, len(chunk)+len(leftover))
+					copy(newLeftover, chunk)
+					copy(newLeftover[len(chunk):], leftover)
+					leftover = newLeftover
+				}
+				break
+			}
+
+			// Found a newline.
+			linePart := chunk[idx+1:]
+
+			// Assemble the full line
+			var fullLine []byte
+			if len(leftover) > 0 {
+				if len(linePart)+len(leftover) <= maxLineSize {
+					fullLine = make([]byte, len(linePart)+len(leftover))
+					copy(fullLine, linePart)
+					copy(fullLine[len(linePart):], leftover)
+				}
+				leftover = nil // Reset for next line
+			} else {
+				fullLine = linePart
+			}
+
+			// Process the full line
+			if len(fullLine) > 0 {
+				var m model.Measurement
+				if err := json.Unmarshal(fullLine, &m); err == nil {
+					if m.Target == targetName {
+						measurements = append(measurements, m)
+						if len(measurements) >= limit {
+							break
+						}
+					}
+				}
+			}
+
+			// Move chunk to the part before the newline
+			chunk = chunk[:idx]
 		}
 	}
 
-	// If scanning fails (e.g. bad line, too long), we just stop reading and return what we have.
-	// Returning an error here causes the frontend to receive a 500 and show nothing.
-	if err := scanner.Err(); err != nil {
-		// We ignore the error to allow partial results.
-		// In a real logger we would log this.
-	}
-
-	// Reverse to get latest first
-	for i, j := 0, len(measurements)-1; i < j; i, j = i+1, j-1 {
-		measurements[i], measurements[j] = measurements[j], measurements[i]
-	}
-
-	if len(measurements) > limit {
-		measurements = measurements[:limit]
+	// Process the very first line of the file (if we reached pos == 0 and there's leftover data)
+	if pos == 0 && len(leftover) > 0 && len(measurements) < limit {
+		var m model.Measurement
+		if err := json.Unmarshal(leftover, &m); err == nil {
+			if m.Target == targetName {
+				measurements = append(measurements, m)
+			}
+		}
 	}
 
 	return measurements, nil
