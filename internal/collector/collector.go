@@ -126,6 +126,23 @@ func (c *Collector) MeasureTarget(t model.Target) {
 	}
 
 	// Logic Branching
+	runMtr := false
+	status := "OK"
+
+	if isSpeedTest {
+		// Speed Test Logic
+		// Trigger MTR if Speed < Threshold OR HTTP Failed
+		if dlErr != nil || statusCode != 200 {
+			runMtr = true
+			status = "ALERT"
+		}
+		if speed < t.Threshold {
+			status = "ALERT"
+			runMtr = true
+		}
+	} else {
+		// Web Check Logic
+		// 1. Run Ping
 	if !isSpeedTest {
 		// Web Check Logic: Run Ping
 		ctxPing, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
