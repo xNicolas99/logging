@@ -138,19 +138,6 @@ func (c *Collector) MeasureTarget(t model.Target) {
 		}
 		if speed < t.Threshold {
 			status = "ALERT"
-			runMtr = true // Optional: Run MTR to debug slow speed?
-			// User said "Speed Tests... Behalte die bestehende Logik".
-			// Existing logic was "runMtr = true if isSpeedTest" (ALWAYS run MTR for Speed Test in original code?
-			// Wait, original code:
-			// if isSpeedTest { runMtr = true } else if ...
-			// So it ALWAYS ran MTR for speed tests.
-			// User said "The latency values are still unrealistic... overhead is blocking...".
-			// But for Speed Tests, maybe they want MTR?
-			// "For standard Web Checks (IsSpeedTest=false), do NOT run MTR... Only do a simple HTTP/Ping check."
-			// Implicitly, for Speed Tests, we might still run MTR or only if slow.
-			// "Speed Tests ... Behalte die bestehende Logik".
-			// Existing logic ran MTR every time for SpeedTest.
-			// I will keep it running every time for SpeedTest if that's what "existing logic" means.
 			runMtr = true
 		}
 	} else {
@@ -229,12 +216,6 @@ func (c *Collector) MeasureTarget(t model.Target) {
 	if traceOutput != "" {
 		c.logger.LogMTR(t.Name, traceOutput)
 	}
-}
-
-func (c *Collector) logError(t model.Target, err error, loss float64, traceOutput string) {
-	// Not used anymore in revised flow, but keeping for compatibility if needed or removed?
-	// I removed calls to it in MeasureTarget. I can remove the method or keep it.
-	// It's private, I'll remove it or update it. I'll just remove/ignore it in this rewrite.
 }
 
 // runPing executes ping -c 5 -i 0.2 <host>
