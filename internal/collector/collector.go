@@ -143,34 +143,14 @@ func (c *Collector) MeasureTarget(t model.Target) {
 	} else {
 		// Web Check Logic
 		// 1. Run Ping
+	if !isSpeedTest {
+		// Web Check Logic: Run Ping
 		ctxPing, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
-		pLoss, pLat, pErr := c.runPing(ctxPing, host)
+		pingLoss, pingLatency, _ = c.runPing(ctxPing, host)
 		cancelPing()
-
-		pingLoss = pLoss
-		pingLatency = pLat
-
-		if pErr != nil {
-			// Ping command failed to run or parse
-			// We might assume it's bad.
-			// If ping failed completely (e.g. timeout), packet loss is likely 100%
-		}
-
-		// Trigger MTR if:
-		// 1. HTTP Failed (Status != 200 or Error)
-		// 2. Ping Packet Loss > 0%
-		// 3. Ping Latency > 100ms
-		if dlErr != nil || statusCode != 200 {
-			runMtr = true
-			status = "ALERT"
-		} else if pingLoss > 0 {
-			runMtr = true
-			status = "ALERT"
-		} else if pingLatency > 100 {
-			runMtr = true
-			status = "ALERT"
-		}
 	}
+
+	status, runMtr := determineStatusAndMTR(isSpeedTest, dlErr, statusCode, speed, t.Threshold, pingLoss, pingLatency)
 
 	if runMtr {
 		ctxMtr, cancelMtr := context.WithTimeout(context.Background(), 20*time.Second)
@@ -216,6 +196,23 @@ func (c *Collector) MeasureTarget(t model.Target) {
 	if traceOutput != "" {
 		c.logger.LogMTR(t.Name, traceOutput)
 	}
+}
+
+// determineStatusAndMTR decides if the measurement is an ALERT and if MTR should be run.
+func determineStatusAndMTR(isSpeedTest bool, dlErr error, statusCode int, speed, threshold, pingLoss, pingLatency float64) (string, bool) {
+	if isSpeedTest {
+		// For Speed Tests, trigger MTR if HTTP fails, status is not 200, or speed is below threshold.
+		if dlErr != nil || statusCode != 200 || speed < threshold {
+			return "ALERT", true
+		}
+		return "OK", false
+	}
+
+	// For Web Checks, trigger MTR if HTTP fails, status is not 200, ping loss occurs, or ping latency is high.
+	if dlErr != nil || statusCode != 200 || pingLoss > 0 || pingLatency > 100 {
+		return "ALERT", true
+	}
+	return "OK", false
 }
 
 // runPing executes ping -c 5 -i 0.2 <host>
