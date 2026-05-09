@@ -115,3 +115,24 @@ func TestDetermineStatusAndMTR(t *testing.T) {
 		})
 	}
 }
+
+func TestIsValidHost(t *testing.T) {
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"google.com", true},
+		{"1.1.1.1", true},
+		{"my-host", true},
+		{"-host", false},
+		{"host;ls", false},
+		{"host$(ls)", false},
+		{"host.com/path", false},
+	}
+
+	for _, tt := range tests {
+		if got := isValidHost(tt.host); got != tt.want {
+			t.Errorf("isValidHost(%q) = %v, want %v", tt.host, got, tt.want)
+		}
+	}
+}

@@ -18,9 +18,17 @@ import (
 )
 
 var (
-	reLoss = regexp.MustCompile(`(\d+)% packet loss`)
-	reLat  = regexp.MustCompile(`min/avg/max(?:/\w+)?\s+=\s+[\d.]+/([\d.]+)/`)
+	reLoss      = regexp.MustCompile(`(\d+)% packet loss`)
+	reLat       = regexp.MustCompile(`min/avg/max(?:/\w+)?\s+=\s+[\d.]+/([\d.]+)/`)
+	hostRegex   = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.-]*$`)
 )
+
+func isValidHost(host string) bool {
+	if host == "" || strings.HasPrefix(host, "-") {
+		return false
+	}
+	return hostRegex.MatchString(host)
+}
 
 // Collector handles the measurement logic.
 type Collector struct {
@@ -217,7 +225,10 @@ func determineStatusAndMTR(isSpeedTest bool, dlErr error, statusCode int, speed,
 
 // runPing executes ping -c 5 -i 0.2 <host>
 func (c *Collector) runPing(ctx context.Context, host string) (loss float64, latency float64, err error) {
-	cmd := exec.CommandContext(ctx, "ping", "-c", "5", "-i", "0.2", host)
+	if !isValidHost(host) {
+		return 0, 0, fmt.Errorf("invalid host: %s", host)
+	}
+	cmd := exec.CommandContext(ctx, "ping", "-c", "5", "-i", "0.2", "--", host)
 	outBytes, err := cmd.CombinedOutput()
 	output := string(outBytes)
 
@@ -248,10 +259,13 @@ func (c *Collector) runPing(ctx context.Context, host string) (loss float64, lat
 
 // runMTR executes mtr --report -c 10 <host> and returns loss percentage and full text output
 func (c *Collector) runMTR(ctx context.Context, host string) (float64, string) {
+	if !isValidHost(host) {
+		return 0, fmt.Sprintf("Invalid host: %s", host)
+	}
 	// mtr needs root, usually available in docker
 	// --report: Text report output
 	// -c 10: 10 cycles
-	cmd := exec.CommandContext(ctx, "mtr", "--report", "-c", "10", host)
+	cmd := exec.CommandContext(ctx, "mtr", "--report", "-c", "10", "--", host)
 	out, err := cmd.Output()
 	output := string(out)
 
