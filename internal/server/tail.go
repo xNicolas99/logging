@@ -9,6 +9,10 @@ import (
 
 // tailLog reads the last n lines from the given file and writes them to out.
 func tailLog(file *os.File, out io.Writer, maxLines int) error {
+	if maxLines <= 0 {
+		return nil
+	}
+
 	stat, err := file.Stat()
 	if err != nil {
 		return err
